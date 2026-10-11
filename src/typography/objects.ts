@@ -1,7 +1,7 @@
 import { Box3, CanvasTexture, ExtrudeGeometry, Group, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace, Vector3 } from 'three';
 import { mergeGroups } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Text, configureTextBuilder } from 'troika-three-text';
-import { fontUrl, validateGlyphs } from './fonts';
+import { DEFAULT_FONT_ID, fontUrl, getDisplayFont, validateGlyphs } from './fonts';
 import type { SceneObject } from '../scene/types';
 import { getTheme, type Theme } from '../themes';
 import { outlineLayout, textAdvance } from './outlines';
@@ -18,8 +18,8 @@ export interface PreparedTypography {
   dispose(): void;
 }
 
-function extruded(spec: SceneObject, theme: Theme): PreparedTypography {
-  const { shapes } = outlineLayout(spec.displayText ?? spec.text, spec.fontSize);
+function extruded(spec: SceneObject, theme: Theme, fontId: string): PreparedTypography {
+  const { shapes } = outlineLayout(spec.displayText ?? spec.text, spec.fontSize, fontId);
   const geometry = new ExtrudeGeometry(shapes, {
     depth: spec.extrusionDepth,
     curveSegments: 14,
@@ -48,10 +48,10 @@ function extruded(spec: SceneObject, theme: Theme): PreparedTypography {
   };
 }
 
-async function sdf(spec: SceneObject, theme: Theme): Promise<PreparedTypography> {
+async function sdf(spec: SceneObject, theme: Theme, fontId: string): Promise<PreparedTypography> {
   const text = new Text();
   text.text = (spec.displayText ?? spec.text).normalize('NFC');
-  text.font = fontUrl;
+  text.font = getDisplayFont(fontId).url;
   text.fontSize = spec.fontSize;
   text.anchorX = 'center';
   text.anchorY = 'middle';
@@ -75,7 +75,7 @@ async function sdf(spec: SceneObject, theme: Theme): Promise<PreparedTypography>
   };
 }
 
-async function hybrid(spec: SceneObject, theme: Theme): Promise<PreparedTypography> {
+async function hybrid(spec: SceneObject, theme: Theme, fontId: string): Promise<PreparedTypography> {
   const root = new Group();
   const bounds = new Box3();
   const items: PreparedTypography[] = [];
@@ -106,7 +106,7 @@ async function hybrid(spec: SceneObject, theme: Theme): Promise<PreparedTypograp
         } else {
           const text = new Text();
           text.text = run.text;
-          text.font = fontUrl;
+          text.font = getDisplayFont(fontId).url;
           text.fontSize = spec.fontSize;
           text.anchorX = 'left'; text.anchorY = 'bottom-baseline'; text.lineHeight = 1.05;
           text.sdfGlyphSize = 128; text.color = theme.colors[spec.colorRole];
@@ -121,7 +121,7 @@ async function hybrid(spec: SceneObject, theme: Theme): Promise<PreparedTypograp
           bounds.expandByPoint(new Vector3(cursor + x0, baseline + y0, 0));
           bounds.expandByPoint(new Vector3(cursor + x1, baseline + y1, 0));
           items.push({ root: new Group(), bounds: new Box3(), recolor(next) { text.color = next.colors[spec.colorRole]; baseMaterial.color.set(next.colors[spec.colorRole]); }, dispose() { text.dispose(); text.material.dispose(); baseMaterial.dispose(); } });
-          cursor += textAdvance(run.text, spec.fontSize);
+          cursor += textAdvance(run.text, spec.fontSize, fontId);
         }
       }
     }
@@ -136,8 +136,8 @@ async function hybrid(spec: SceneObject, theme: Theme): Promise<PreparedTypograp
   }
 }
 
-export async function prepareTypography(spec: SceneObject, themeId = 'califormandy-sunset'): Promise<PreparedTypography> {
-  validateGlyphs(spec.text);
+export async function prepareTypography(spec: SceneObject, themeId = 'califormandy-sunset', fontId = DEFAULT_FONT_ID): Promise<PreparedTypography> {
+  validateGlyphs(spec.text, fontId);
   const theme = getTheme(themeId);
-  return isEmoji(spec.displayText ?? spec.text) ? hybrid(spec, theme) : spec.extruded ? extruded(spec, theme) : sdf(spec, theme);
+  return isEmoji(spec.displayText ?? spec.text) ? hybrid(spec, theme, fontId) : spec.extruded ? extruded(spec, theme, fontId) : sdf(spec, theme, fontId);
 }

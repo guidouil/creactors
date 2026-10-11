@@ -3,6 +3,7 @@ import type { CameraPose, CameraTrack, ColorRole, SceneObject, SceneSpec, Vec3 }
 import type { TextAnalysis } from '../text/director';
 import type { MeasuredGroup } from '../typography/measure';
 import { emojiCoverage } from '../typography/emoji';
+import { DEFAULT_FONT_ID, getDisplayFont } from '../typography/fonts';
 import { applySecretFilm } from './secrets';
 
 const GENERATOR_VERSION = 'spatial-grammar-2.2.1';
@@ -449,7 +450,8 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   chapters.push({ time: rushStart, objectId: null, primitive: 'DEPTH' });
   return {
     id: `generated-${seed >>> 0}-${attempt}`, generatorVersion: GENERATOR_VERSION,
-    fontVersion: `barlow-condensed-black-1${analysis.tokens.some(token => token.emoji) ? `+noto-emoji-700-${emojiCoverage.version}` : ''}`,
+    fontId: measured[0]?.fontId ?? DEFAULT_FONT_ID,
+    fontVersion: `${getDisplayFont(measured[0]?.fontId).version}${analysis.tokens.some(token => token.emoji) ? `+noto-emoji-700-${emojiCoverage.version}` : ''}`,
     sourceText: analysis.sourceText, inputLanguage: analysis.language, themeId, seed: seed >>> 0, duration,
     directionStyle: style, posterTime: frameTime(revealEnd + Math.min(0.45, posterHold / 2)),
     fps: FPS, aspect: ASPECT, fov: FOV, objects, cameraTracks: tracks, chapters,
@@ -459,7 +461,7 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
 export const MotionDirector = {
   direct(analysis: TextAnalysis, measured: readonly MeasuredGroup[], themeId: string, seed: number, previousSignature?: string | readonly string[]): SceneSpec {
     const history = typeof previousSignature === 'string' ? [previousSignature] : previousSignature ?? [];
-    if (analysis.sourceText === FUTURE_QUOTE && seed === stableSeed(FUTURE_QUOTE) && history.length === 0) return { ...futureDemo, inputLanguage: analysis.language, themeId, seed };
+    if ((measured[0]?.fontId ?? DEFAULT_FONT_ID) === DEFAULT_FONT_ID && analysis.sourceText === FUTURE_QUOTE && seed === stableSeed(FUTURE_QUOTE) && history.length === 0) return { ...futureDemo, inputLanguage: analysis.language, themeId, seed };
     const styles = history.flatMap(signature => {
       try { const style = (JSON.parse(signature) as { styles?: DirectionStyle }).styles; return style ? [style] : []; }
       catch { return []; }
@@ -476,7 +478,7 @@ export const MotionDirector = {
     for (let attempt = 0; attempt < 48; attempt++) {
       // A saved seed alone must reproduce the accepted film. Retry complete
       // candidate seeds, never invisible attempt-specific random streams.
-      if (analysis.sourceText === FUTURE_QUOTE && candidateSeed === stableSeed(FUTURE_QUOTE)) candidateSeed = nextRemixSeed(analysis.sourceText, candidateSeed);
+      if ((measured[0]?.fontId ?? DEFAULT_FONT_ID) === DEFAULT_FONT_ID && analysis.sourceText === FUTURE_QUOTE && candidateSeed === stableSeed(FUTURE_QUOTE)) candidateSeed = nextRemixSeed(analysis.sourceText, candidateSeed);
       const spec = applySecretFilm(generate(analysis, measured, themeId, candidateSeed, 0));
       if (accept(spec)) return spec;
       candidateSeed = nextRemixSeed(analysis.sourceText, candidateSeed);

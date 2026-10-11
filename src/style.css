@@ -110,7 +110,32 @@ button, a, textarea, input { outline-offset: 6px; }
 .help-list h3 { margin: 0 0 5px; font-size: 12px; font-weight: 650; line-height: 1.4; }
 .help-list p { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.6; }
 .help-color-icon { display: block; width: 16px; height: 16px; margin: 2px; border: 1px solid var(--pink); border-radius: 50%; background: var(--pink); box-shadow: inset -7px 0 0 var(--page); }
+.help-font-icon { color: var(--pink); font-family: Georgia, serif; font-size: 18px; line-height: 20px; }
 .help-local { margin: 8px 0 0; padding-top: 15px; border-top: 1px solid var(--line); color: var(--quiet); font-size: 11px; line-height: 1.5; }
+
+.font-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 20px; border: 1px solid var(--line); border-radius: 3px; background: var(--page); color: var(--white); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.font-dialog::backdrop { background: #0c0c1bb3; }
+.font-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: -20px; z-index: 1; margin: -20px -20px 0; padding: 12px 12px 10px 20px; background: var(--page); }
+.font-heading h2 { margin: 0; font-size: 17px; line-height: 1.4; }
+.font-close { flex-shrink: 0; color: var(--quiet); }
+.font-description { margin: 0 0 16px; color: var(--secondary); font-size: 12px; line-height: 1.6; }
+.font-search { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--hover); color: var(--white); font-size: 16px; }
+.font-search::placeholder { color: var(--quiet); }
+.font-section { margin-top: 18px; }
+.font-section h3 { margin: 0 0 10px; color: var(--secondary); font-size: 11px; font-weight: 650; line-height: 1.4; }
+.font-options, .font-device-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.font-option { min-width: 0; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--hover); color: var(--white); text-align: left; }
+.font-option:hover { border-color: var(--pink); }
+.font-option[aria-pressed="true"] { border-color: var(--pink); background: var(--accent-outline); }
+.font-option-name { display: block; color: var(--secondary); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.font-option[aria-pressed="true"] .font-option-name { color: var(--pink); }
+.font-option-sample { display: block; margin-top: 8px; font-size: 27px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.font-source-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.font-source-actions button { flex: 1 1 160px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--hover); color: var(--pink); font-size: 11px; }
+.font-source-actions button:hover { border-color: var(--pink); }
+.font-device-note, .font-device-limit { margin: 8px 0 0; color: var(--quiet); font-size: 10px; line-height: 1.5; }
+.font-device-options { max-height: 300px; padding: 2px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.font-status { min-height: 18px; margin: 12px 0 0; color: var(--notice); font-size: 11px; line-height: 1.5; }
 
 .giphy-dialog { width: min(650px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 20px; border: 1px solid var(--line); border-radius: 3px; background: var(--page); color: var(--white); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .giphy-dialog::backdrop { background: #0c0c1bb3; }
@@ -180,6 +205,11 @@ button, a, textarea, input { outline-offset: 6px; }
 .quote-input::placeholder { color: var(--faint); }
 .quote-input:focus:not(:focus-visible) { outline: none; }
 .input-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 13px; }
+.font-button { flex-shrink: 0; color: var(--quiet); }
+.font-button-mark { font-family: Georgia, serif; font-size: 18px; line-height: 1; }
+.font-editor-button { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 44px; max-width: calc(100% - 52px); min-height: 44px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 2px; background: transparent; text-align: left; transition: color .2s, border-color .2s; }
+.font-editor-button:hover { color: var(--pink); border-color: var(--pink); }
+.font-button-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .create-button { display: flex; justify-content: space-between; align-items: center; width: 182px; height: 52px; margin-top: 18px; padding: 0 21px; border: 1px solid var(--pink); border-radius: 2px; background: var(--pink); color: var(--button-ink); font-size: 11px; font-weight: 750; letter-spacing: .09em; transition: background .2s, border-color .2s, transform .2s; }
 .create-button svg { width: 22px; height: 22px; }
 .create-button:hover { background: var(--coral); border-color: var(--coral); transform: translateY(-2px); }

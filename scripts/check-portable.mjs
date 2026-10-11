@@ -26,7 +26,7 @@ try {
   await page.goto(file.href);
   await page.locator('.help-button').click();
   assert.equal(await page.locator('.help-dialog').evaluate(dialog => dialog.open), true);
-  assert.equal(await page.locator('.help-feature').count(), 6);
+  assert.equal(await page.locator('.help-feature').count(), 7);
   assert.ok((await page.locator('.help-dialog').textContent()).includes('MP4'));
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.help-dialog').evaluate(dialog => dialog.open), false);
@@ -43,6 +43,11 @@ try {
   assert.equal(await page.locator('.create-button').isVisible(), true, 'Welcome motion must leave the editor available.');
   await page.locator('.example-button').click();
   assert.notEqual(await page.locator('.quote-input').inputValue(), initialExample);
+  await page.locator('.font-editor-button').click();
+  assert.equal(await page.locator('.font-device-button').isVisible(), false, 'An opaque file origin cannot enumerate device fonts.');
+  await page.locator('[data-font-id="montserrat-bold"]').click();
+  await page.locator('#font-picker').waitFor({ state: 'hidden' });
+  assert.ok((await page.locator('.quote-input').evaluate(element => element.style.fontFamily)).includes('Montserrat'));
   await page.locator('.create-button').click();
   await page.waitForFunction(() => document.querySelector('.studio')?.dataset.state === 'playing', null, { timeout: 30000 });
   await page.waitForTimeout(1100);
@@ -56,6 +61,10 @@ try {
   assert.equal(state.devTools, false, 'Production must exclude the development API.');
   assert.equal(state.width / state.height, 9 / 16);
   assert.ok(Math.abs(state.aspect - 9 / 16) < 0.002);
+  await page.locator('.font-film-button').click();
+  await page.locator('.font-file').setInputFiles(new URL('../assets/fonts/Anton-Regular.ttf', import.meta.url).pathname);
+  await page.locator('#font-picker').waitFor({ state: 'hidden' });
+  assert.ok((await page.locator('.font-film-button').getAttribute('aria-label')).includes('Anton'), 'Static font import must work from a portable file.');
   const quote = 'Créons ensemble 👨‍👩‍👧‍👦 1️⃣ ❤️. Le futur est ici.';
   await page.locator('.quote-input').fill(quote);
   await page.locator('.create-button').click();

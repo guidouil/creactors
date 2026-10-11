@@ -58,8 +58,8 @@ is embedded byte-for-byte. `dist/` contains exactly one file: upload its
 `index.html` to the FTP hosting directory. No separate audio directory or local
 Downloads file is needed on the server. For installable offline reopening,
 upload the complete `dist-static/` distribution instead.
-The current complete build measures 4.99 MiB uncompressed and 2722 KiB gzip,
-including fonts, six recorded clips and license notices.
+The complete build includes fonts, six recorded clips and license notices;
+`npm run build` reports its current uncompressed and gzip sizes.
 
 ## Create, remix and export
 
@@ -269,8 +269,25 @@ and iPad devices. Native Safari soundtrack export remains to be confirmed.
 
 ## Typography and local direction
 
+The Aa button in the editor and beside the playback controls opens a searchable
+font picker with previews of the current text. Barlow Condensed Black, Anton,
+Bebas Neue and Montserrat Bold are bundled for offline use. Selecting a font in
+the editor changes the draft; CREATE applies it to the next film. Selecting from
+the film controls refits the current text with the same seed and colors. REMIX,
+photos, playback and video export retain the generated film's font.
+
+On compatible desktop browsers, an explicit click on “Fonts on this device”
+requests permission to list installed fonts. This requires HTTPS or localhost
+and a non-opaque origin. On other browsers, including portable `file://` pages,
+import a static TTF or OTF instead. Font files remain in the browser session and
+are never uploaded. Imports are limited to 16 MiB and bounded outline complexity;
+variable fonts, font collections and compressed webfonts are not supported.
+Unsupported files or missing characters leave the existing film available.
+The source fonts, provenance, licenses and offline rebuild procedure are
+documented in [assets/fonts/README.md](assets/fonts/README.md).
+
 Most phrases are sharp world-space Troika SDF text. Selected semantic anchors
-use shallow extrusion from the same bundled Barlow Condensed Black outlines,
+use shallow extrusion from the selected font's outlines,
 providing visible sidewalls and real depth. Geometry, typography and shaders
 are prepared before playback; a frame never reshapes the quotation.
 

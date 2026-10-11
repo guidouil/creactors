@@ -134,6 +134,8 @@ export interface SceneSpec {
   id: string;
   generatorVersion: string;
   fontVersion: string;
+  /** Font registry key; omitted by legacy scenes authored with Barlow. */
+  fontId?: string;
   sourceText: string;
   inputLanguage: 'fr' | 'en';
   themeId: string;

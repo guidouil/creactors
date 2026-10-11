@@ -266,7 +266,7 @@ function projectedTextFraction(spec: SceneSpec, time: number): number {
     const transform = state.objects[index]!;
     const centre = new Vector3(...transform.position).applyMatrix4(camera.matrixWorldInverse);
     if (centre.z >= -camera.near) return 0;
-    const lines = (object.displayText ?? object.text).split('\n').map(measureLine);
+      const lines = (object.displayText ?? object.text).split('\n').map(line => measureLine(line));
     const width = Math.max(...lines.map(line => line.width));
     const height = 0.7 + (lines.length - 1) * 0.95;
     const rotation = new Quaternion().setFromEuler(new Euler(...transform.rotation));

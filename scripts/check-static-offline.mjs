@@ -64,7 +64,7 @@ try {
   await offline.waitForSelector('.stage canvas');
   await offline.locator('.help-button').click();
   if (!await offline.locator('.help-dialog').evaluate(dialog => dialog.open)) throw new Error('Offline help did not open.');
-  if (await offline.locator('.help-feature').count() !== 6) throw new Error('The offline help overview is incomplete.');
+  if (await offline.locator('.help-feature').count() !== 7) throw new Error('The offline help overview is incomplete.');
   await offline.keyboard.press('Escape');
   if (await offline.locator('.help-dialog').evaluate(dialog => dialog.open)) throw new Error('Offline help did not close.');
   const controlled = await offline.evaluate(() => !!navigator.serviceWorker.controller);
@@ -81,9 +81,17 @@ try {
     || !await offline.locator('.create-button').isVisible()) throw new Error('The animated welcome hid the offline editor.');
   await offline.locator('.example-button').click();
   if (await quote.inputValue() === firstExample) throw new Error('The offline example button repeated its phrase.');
+  await offline.locator('.font-editor-button').click();
+  await offline.locator('[data-font-id="montserrat-bold"]').click();
+  await offline.locator('#font-picker').waitFor({ state: 'hidden' });
+  if (!(await quote.evaluate(element => element.style.fontFamily)).includes('Montserrat')) throw new Error('The offline draft did not load its selected font.');
   await offline.locator('.create-button').click();
   await offline.waitForFunction(() => ['playing', 'paused'].includes(document.querySelector('.studio')?.dataset.state), undefined, { timeout: 60_000 });
   if ((await offline.locator('.studio').getAttribute('data-state')) === 'playing') await offline.locator('.toggle-button').click();
+  await offline.locator('.font-film-button').click();
+  await offline.locator('[data-font-id="anton"]').click();
+  await offline.locator('#font-picker').waitFor({ state: 'hidden' });
+  if (!(await offline.locator('.font-film-button').getAttribute('aria-label')).includes('Anton')) throw new Error('The offline film did not change its font.');
   for (const colorScheme of ['dark', 'light']) {
     await offline.emulateMedia({ colorScheme });
     await offline.waitForFunction(scheme => document.documentElement.dataset.colorScheme === scheme, colorScheme);

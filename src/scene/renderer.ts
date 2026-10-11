@@ -103,7 +103,7 @@ export class SceneRenderer {
       // Sequential setup bounds font-generation work and makes cleanup complete
       // even when one asynchronous text object fails to prepare.
       for (const object of spec.objects) {
-        const typography = await prepareTypography(object, spec.themeId);
+        const typography = await prepareTypography(object, spec.themeId, spec.fontId);
         // A restored context can begin preparation while an older text sync is
         // pending. That result belongs to the old generation, never the world.
         if (generation !== this.preparationGeneration) {

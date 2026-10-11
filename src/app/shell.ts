@@ -5,6 +5,8 @@ import { MAX_IMAGE_COUNT } from '../image/types';
 import type { ImageAsset } from '../image/types';
 import type { GiphyResult } from '../image/giphy';
 import { createGiphyPicker } from './giphy-picker';
+import { createFontPicker } from './font-picker';
+import { DEFAULT_FONT_ID, getDisplayFont } from '../typography/fonts';
 import { builtinAudioTracks, getBuiltinAudio, isBuiltinAudioId } from '../audio/choices';
 import { mountEasterEggs } from './easter-eggs';
 import { findSecretFilm, type SecretFilmId } from '../direction/secrets';
@@ -17,6 +19,7 @@ export interface ShellOptions {
   locale: Locale;
   themeId?: string;
   automaticTheme?: boolean;
+  fontId?: string;
 }
 
 export interface FilmDetails {
@@ -26,6 +29,7 @@ export interface FilmDetails {
   seed: number;
   themeId: string;
   secretFilm?: SecretFilmId;
+  fontId?: string;
 }
 
 export interface ExportProgress {
@@ -59,7 +63,7 @@ export interface ImageDetails {
 export interface Shell {
   canvas: HTMLCanvasElement;
   stage: HTMLElement;
-  getInput(): { text: string };
+  getInput(): { text: string; fontId: string };
   onCreate(callback: () => void): void;
   onExample(callback: () => void): void;
   onTogglePlayback(callback: () => void): void;
@@ -72,6 +76,7 @@ export interface Shell {
   onCancelExport(callback: () => void): void;
   onEdit(callback: () => void): void;
   onThemeChange(callback: (familyId: string | null) => void): void;
+  onFontChange(callback: (fontId: string, applyToFilm: boolean) => void | Promise<void>): void;
   onImageImport(callback: (files: File[]) => void): void;
   onGiphySelect(callback: (result: GiphyResult, signal: AbortSignal) => Promise<void>): void;
   onImageRemove(callback: (index: number) => void): void;
@@ -84,11 +89,12 @@ export interface Shell {
   setFilm(film: FilmDetails, preserveEditing?: boolean): void;
   setExampleText(text: string): void;
   setTheme(themeId: string, automatic: boolean): void;
+  setFont(fontId: string): void;
   setImages(details: ImageDetails[]): void;
   setImageLoading(loading: boolean): void;
   setAudio(details: AudioDetails | null): void;
   setAudioLoading(loading: boolean): void;
-  setState(state: ShellState): void;
+  setState(state: ShellState, preserveEditing?: boolean): void;
   setEditing(editing: boolean): void;
   setProgress(progress: number): void;
   setExportProgress(progress: ExportProgress | null): void;
@@ -108,6 +114,9 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   let exportProgress: ExportProgress | null = null;
   let themeId = options.themeId ?? 'califormandy-sunset';
   let automaticTheme = options.automaticTheme ?? true;
+  let fontId = options.fontId ?? DEFAULT_FONT_ID;
+  let filmFontId = fontId;
+  let fontPickerAppliesToFilm = false;
   let imageDetails: ImageDetails[] = [];
   let imageLoading = false;
   let audioDetails: AudioDetails | null = null;
@@ -126,6 +135,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   let cancelExportCallback: () => void = () => undefined;
   let editCallback: () => void = () => undefined;
   let themeCallback: (familyId: string | null) => void = () => undefined;
+  let fontCallback: (fontId: string, applyToFilm: boolean) => void | Promise<void> = () => undefined;
   let imageImportCallback: (files: File[]) => void = () => undefined;
   let giphySelectCallback: (result: GiphyResult, signal: AbortSignal) => Promise<void> = async () => undefined;
   let imageRemoveCallback: (index: number) => void = () => undefined;
@@ -160,6 +170,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
           </div>
           <textarea class="quote-input" spellcheck="false" rows="5"></textarea>
           <div class="input-controls">
+            <button class="font-editor-button font-button" type="button"><span class="font-button-mark" aria-hidden="true">Aa</span><span class="font-button-name"></span></button>
             <button class="image-editor-button image-button icon-button" type="button">${icon('image')}</button>
           </div>
           <button class="create-button" type="button"><span class="create-label"></span>${icon('arrow')}</button>
@@ -189,6 +200,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
               <div class="film-settings-bar">
                 <span class="timecode" aria-hidden="true">00:00 <span>/ 00:12</span></span>
                 <div class="film-media-buttons">
+                  <button class="font-film-button font-button icon-button" type="button"><span class="font-button-mark" aria-hidden="true">Aa</span></button>
                   <button class="image-film-button image-button icon-button" type="button">${icon('image')}</button>
                   <button class="audio-button icon-button" type="button" aria-expanded="false" aria-controls="film-audio">${icon('audio')}</button>
                 </div>
@@ -232,6 +244,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
           <li class="help-feature">${icon('edit')}<div><h3 class="help-create-title"></h3><p class="help-create"></p></div></li>
           <li class="help-feature">${icon('remix')}<div><h3 class="help-remix-title"></h3><p class="help-remix"></p></div></li>
           <li class="help-feature"><span class="help-color-icon" aria-hidden="true"></span><div><h3 class="help-colors-title"></h3><p class="help-colors"></p></div></li>
+          <li class="help-feature"><span class="help-font-icon" aria-hidden="true">Aa</span><div><h3 class="help-fonts-title"></h3><p class="help-fonts"></p></div></li>
           <li class="help-feature">${icon('audio')}<div><h3 class="help-audio-title"></h3><p class="help-audio"></p></div></li>
           <li class="help-feature">${icon('image')}<div><h3 class="help-photos-title"></h3><p class="help-photos"></p></div></li>
           <li class="help-feature">${icon('download')}<div><h3 class="help-download-title"></h3><p class="help-download"></p></div></li>
@@ -348,6 +361,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   const themeButtons = [...host.querySelectorAll<HTMLButtonElement>('[data-theme]')];
   const audioPresetButtons = [...host.querySelectorAll<HTMLButtonElement>('[data-audio-preset]')];
   const imageButtons = [...host.querySelectorAll<HTMLButtonElement>('.image-button')];
+  const fontButtons = [...host.querySelectorAll<HTMLButtonElement>('.font-button')];
   const imageGalleries = [...host.querySelectorAll<HTMLElement>('.image-gallery')];
   const imageAttributions = [...host.querySelectorAll<HTMLElement>('.image-attributions')];
   const giphyPicker = createGiphyPicker(studio, {
@@ -358,6 +372,36 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   for (const button of imageButtons) {
     button.setAttribute('aria-haspopup', 'dialog');
     button.setAttribute('aria-controls', 'final-media-picker');
+  }
+  const fontPicker = createFontPicker(studio, {
+    getLocale: () => locale,
+    getSample: () => fontPickerAppliesToFilm ? transcript.textContent ?? quote.value : quote.value,
+    async onChange(id) {
+      await fontCallback(id, fontPickerAppliesToFilm);
+      if (!fontPickerAppliesToFilm || !editing) setFont(id);
+    },
+  });
+  for (const button of fontButtons) {
+    button.setAttribute('aria-haspopup', 'dialog');
+    button.setAttribute('aria-controls', 'font-picker');
+    button.addEventListener('click', () => {
+      if (button.disabled) return;
+      fontPickerAppliesToFilm = button.classList.contains('font-film-button');
+      fontPicker.setFont(fontPickerAppliesToFilm ? filmFontId : fontId);
+      fontPicker.open(button);
+    });
+  }
+
+  function setFont(id: string) {
+    const font = getDisplayFont(id);
+    fontId = font.id;
+    quote.style.fontFamily = `${JSON.stringify(font.family)}, sans-serif`;
+    quote.style.fontWeight = String(font.weight);
+    quote.style.fontStyle = font.style;
+    find<HTMLElement>('.font-button-name').textContent = font.name;
+    buttonLabel(find<HTMLButtonElement>('.font-editor-button'), strings(locale).fontCurrent(font.name));
+    buttonLabel(find<HTMLButtonElement>('.font-film-button'), strings(locale).fontCurrent(getDisplayFont(filmFontId).name));
+    fontPicker.setFont(id);
   }
 
   function updateMessageSpace() {
@@ -828,6 +872,8 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     find<HTMLElement>('.help-remix').textContent = copy.helpRemix;
     find<HTMLElement>('.help-colors-title').textContent = copy.helpColorsTitle;
     find<HTMLElement>('.help-colors').textContent = copy.helpColors;
+    find<HTMLElement>('.help-fonts-title').textContent = copy.helpFontsTitle;
+    find<HTMLElement>('.help-fonts').textContent = copy.helpFonts;
     find<HTMLElement>('.help-audio-title').textContent = copy.helpAudioTitle;
     find<HTMLElement>('.help-audio').textContent = copy.helpAudio;
     find<HTMLElement>('.help-photos-title').textContent = copy.helpPhotosTitle;
@@ -859,6 +905,11 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     buttonLabel(cancelExport, copy.cancelExport);
     find<HTMLElement>('.state-announcement').textContent = state === 'idle' ? copy.ready : copy[state];
     updateImage();
+    const currentFont = getDisplayFont(fontId);
+    const filmFont = getDisplayFont(filmFontId);
+    buttonLabel(find<HTMLButtonElement>('.font-editor-button'), copy.fontCurrent(currentFont.name));
+    buttonLabel(find<HTMLButtonElement>('.font-film-button'), copy.fontCurrent(filmFont.name));
+    fontPicker.updateLocale();
     updateAudio();
     updateAudioCredits();
     updateExport();
@@ -885,6 +936,8 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     edit.disabled = busy;
     toggle.hidden = state === 'ended';
     for (const button of themeButtons) button.disabled = busy;
+    for (const button of fontButtons) button.disabled = busy;
+    fontPicker.setDisabled(busy);
     updateLabels();
   }
 
@@ -920,13 +973,14 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     updateLabels();
   }
 
+  setFont(fontId);
   updateTheme();
   updateState();
 
   return {
     canvas,
     stage,
-    getInput() { return { text: quote.value }; },
+    getInput() { return { text: quote.value, fontId }; },
     onCreate(callback) { createCallback = callback; },
     onExample(callback) { exampleCallback = callback; },
     onTogglePlayback(callback) { toggleCallback = callback; },
@@ -939,6 +993,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     onCancelExport(callback) { cancelExportCallback = callback; },
     onEdit(callback) { editCallback = callback; },
     onThemeChange(callback) { themeCallback = callback; },
+    onFontChange(callback) { fontCallback = callback; },
     onImageImport(callback) { imageImportCallback = callback; },
     onGiphySelect(callback) { giphySelectCallback = callback; },
     onImageRemove(callback) { imageRemoveCallback = callback; },
@@ -949,9 +1004,14 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     onLocaleChange(callback) { localeCallback = callback; },
     getLocale() { return locale; },
     setExampleText,
+    setFont,
     setFilm(film, preserveEditing = false) {
       duration = Math.max(0.1, film.duration);
       themeId = film.themeId;
+      if (film.fontId) {
+        filmFontId = film.fontId;
+        if (!preserveEditing || !editing) setFont(film.fontId);
+      }
       hasFilm = true;
       activeSecret = film.secretFilm ? findSecretFilm(film.text) : null;
       if (activeSecret) easterEggs.discoverFilm(activeSecret.id);
@@ -967,6 +1027,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     setPreview(film) {
       duration = Math.max(0.1, film.duration);
       themeId = film.themeId;
+      if (film.fontId) { filmFontId = film.fontId; setFont(film.fontId); }
       transcript.textContent = film.text;
       transcript.lang = film.language;
       if (quote.value === film.text) quote.lang = film.language;
@@ -1000,10 +1061,10 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
       audioLoading = loading;
       updateState();
     },
-    setState(next) {
+    setState(next, preserveEditing = false) {
       state = next;
       if (next === 'idle' || next === 'error') editing = true;
-      else if (next === 'preparing') editing = false;
+      else if (next === 'preparing' && !preserveEditing) editing = false;
       updateState();
     },
     setEditing(value) { editing = value; updateState(); },

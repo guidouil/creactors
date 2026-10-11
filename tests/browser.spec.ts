@@ -27,6 +27,184 @@ interface DebugApi {
 
 type DebugWindow = Window & { __CREACTORS_DEV__: DebugApi };
 
+test('selects bundled fonts for the draft, 3D film and remixes with unclipped reading holds', async ({ page }) => {
+  const diagnostics = await openStudio(page);
+  await page.locator('.font-editor-button').click();
+  await expect(page.locator('#font-picker')).toBeVisible();
+  await expect(page.locator('.font-options .font-option')).toHaveCount(4);
+  await page.locator('[data-font-id="anton"]').click();
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /Anton/);
+  await createAndPause(page);
+  const original = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
+  expect(original.fontId).toBe('anton');
+  for (const fontId of ['bebas-neue', 'montserrat-bold', 'barlow-condensed-black']) {
+    await page.locator('.font-film-button').click();
+    await page.locator(`[data-font-id="${fontId}"]`).click();
+    await expect(page.locator('#font-picker')).not.toBeVisible();
+    const result = await page.evaluate(() => {
+      const dev = (window as unknown as DebugWindow).__CREACTORS_DEV__;
+      return { spec: dev.spec, bounds: dev.spec.objects.map(object => {
+        dev.seek((object.readingInterval[0] + object.readingInterval[1]) / 2);
+        return dev.bounds().find(box => box.id === object.id)!;
+      }) };
+    });
+    expect(result.spec.fontId ?? 'barlow-condensed-black').toBe(fontId);
+    expect(result.spec.sourceText).toBe(original.sourceText);
+    expect(result.spec.themeId).toBe(original.themeId);
+    expect(result.spec.seed).toBe(original.seed);
+    for (const box of result.bounds) {
+      expect(box.min[0]).toBeGreaterThan(-0.9);
+      expect(box.max[0]).toBeLessThan(0.9);
+      expect(box.min[1]).toBeGreaterThan(-0.9);
+      expect(box.max[1]).toBeLessThan(0.9);
+    }
+  }
+  await page.locator('.font-film-button').click();
+  await page.locator('[data-font-id="montserrat-bold"]').click();
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  await page.locator('.remix-button').click();
+  await expect(page.locator('.studio')).toHaveAttribute('data-state', 'playing');
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe('montserrat-bold');
+  diagnostics.verify();
+});
+
+test('imports a local TTF for 3D text and keeps the current film after a rejected file', async ({ page }) => {
+  const diagnostics = await openStudio(page);
+  await createAndPause(page);
+  await page.locator('.font-film-button').click();
+  await page.locator('.font-file').setInputFiles('assets/fonts/Anton-Regular.ttf');
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  const imported = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
+  expect(imported.fontId).toMatch(/^local-/);
+  const geometry = await page.evaluate(() => {
+    const dev = (window as unknown as DebugWindow).__CREACTORS_DEV__;
+    return dev.spec.objects.map(object => {
+      dev.seek((object.readingInterval[0] + object.readingInterval[1]) / 2);
+      return dev.bounds().find(box => box.id === object.id)!;
+    });
+  });
+  for (const box of geometry) expect(box.max[0] - box.min[0]).toBeGreaterThan(0.05);
+  await page.locator('.font-film-button').click();
+  await page.locator('.font-file').setInputFiles({ name: 'broken.ttf', mimeType: 'font/ttf', buffer: Buffer.from('not a font') });
+  await expect(page.locator('.font-status')).not.toBeEmpty();
+  await expect(page.locator('#font-picker')).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec)).toEqual(imported);
+  await page.locator('.font-close').click();
+  await expect(page.locator('.font-film-button')).toBeFocused();
+  diagnostics.verify();
+});
+
+test('requests OS fonts only from an explicit click and recovers after access is refused', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.assign(window, { fontQueries: 0, async queryLocalFonts() {
+      (window as unknown as { fontQueries: number }).fontQueries++;
+      throw new DOMException('Access refused', 'NotAllowedError');
+    } });
+  });
+  const diagnostics = await openStudio(page);
+  await page.locator('.font-editor-button').click();
+  expect(await page.evaluate(() => (window as unknown as { fontQueries: number }).fontQueries)).toBe(0);
+  await page.locator('.font-device-button').click();
+  await expect(page.locator('.font-status')).toContainText('Access to device fonts was not granted');
+  expect(await page.evaluate(() => (window as unknown as { fontQueries: number }).fontQueries)).toBe(1);
+  await page.locator('[data-font-id="anton"]').click();
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /Anton/);
+  diagnostics.verify();
+});
+
+test('keeps draft and film font choices independent while editing', async ({ page }) => {
+  const diagnostics = await openStudio(page);
+  await createAndPause(page);
+  const original = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
+  await page.locator('.edit-button').click();
+  await page.locator('.quote-input').fill('Un nouveau brouillon.');
+  await page.locator('.font-editor-button').click();
+  await page.locator('[data-font-id="anton"]').click();
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec)).toEqual(original);
+  await page.locator('.font-film-button').click();
+  await page.locator('[data-font-id="montserrat-bold"]').click();
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /Anton/);
+  await expect(page.locator('.quote-input')).toHaveValue('Un nouveau brouillon.');
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe('montserrat-bold');
+  await createAndPause(page);
+  const created = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
+  expect(created.fontId).toBe('anton');
+  expect(created.sourceText).toBe('Un nouveau brouillon.');
+  diagnostics.verify();
+});
+
+test('loads a chosen OS font locally without requesting remote assets', async ({ page }) => {
+  const fontBytes = [...await readFile('assets/fonts/Anton-Regular.ttf')];
+  await page.addInitScript(bytes => {
+    Object.assign(window, { async queryLocalFonts() {
+      return [{ postscriptName: 'Anton-Regular', fullName: 'Anton Regular', family: 'Anton', style: 'Regular',
+        async blob() { return new Blob([new Uint8Array(bytes)], { type: 'font/ttf' }); } }];
+    } });
+  }, fontBytes);
+  const diagnostics = await openStudio(page);
+  await page.locator('.font-editor-button').click();
+  await page.locator('.font-device-button').click();
+  await expect(page.locator('.font-device-options .font-option')).toHaveCount(1);
+  await page.locator('.font-device-options .font-option').click();
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  await createAndPause(page);
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toMatch(/^local-/);
+  diagnostics.verify();
+});
+
+test('exports the selected font with video frames matching the 3D preview', async ({ page }) => {
+  test.setTimeout(90000);
+  const diagnostics = await openStudio(page);
+  await page.locator('.quote-input').fill('Make  words  move.');
+  await page.locator('.font-editor-button').click();
+  await page.locator('[data-font-id="montserrat-bold"]').click();
+  await expect(page.locator('#font-picker')).not.toBeVisible();
+  await createAndPause(page);
+  const downloaded = page.waitForEvent('download');
+  await page.locator('.download-button').click();
+  const download = await downloaded;
+  const bytes = await readFile((await download.path())!);
+  const differences = await page.evaluate(async ({ encoded, mp4 }) => {
+    const dev = (window as unknown as DebugWindow).__CREACTORS_DEV__;
+    const modulePath = '/node_modules/mediabunny/dist/modules/src/index.js';
+    const media = await import(modulePath);
+    const input = new media.Input({ source: new media.BlobSource(new Blob([Uint8Array.from(atob(encoded), char => char.charCodeAt(0))])), formats: [mp4 ? media.MP4 : media.WEBM] });
+    const size = dev.renderer.getSize(), previousTime = dev.renderer.lastTime;
+    try {
+      const track = await input.getPrimaryVideoTrack();
+      if (!track) throw new Error('The font export has no video track.');
+      dev.renderer.resize(await track.getDisplayWidth(), await track.getDisplayHeight());
+      const reference = document.createElement('canvas'), decoded = document.createElement('canvas');
+      reference.width = decoded.width = 144; reference.height = decoded.height = 256;
+      const a = reference.getContext('2d', { willReadFrequently: true })!, b = decoded.getContext('2d', { willReadFrequently: true })!;
+      const sink = new media.VideoSampleSink(track);
+      const differences: number[] = [];
+      for (const object of dev.spec.objects) {
+        const time = Math.round((object.readingInterval[0] + object.readingInterval[1]) / 2 * 30) / 30;
+        const sample = await sink.getSample(time + 0.0006);
+        if (!sample) throw new Error('A selected-font frame is missing.');
+        try {
+          dev.renderer.renderFrame(time); a.drawImage(dev.renderer.canvas, 0, 0, 144, 256); sample.draw(b, 0, 0, 144, 256);
+          const preview = a.getImageData(0, 0, 144, 256).data, video = b.getImageData(0, 0, 144, 256).data;
+          let difference = 0;
+          for (let index = 0; index < video.length; index += 4) for (let channel = 0; channel < 3; channel++) difference += Math.abs(video[index + channel]! - preview[index + channel]!);
+          differences.push(difference / (144 * 256 * 3));
+        } finally { sample.close(); }
+      }
+      return differences;
+    } finally { input.dispose(); dev.renderer.resize(...size); dev.renderer.renderFrame(previousTime); }
+  }, { encoded: bytes.toString('base64'), mp4: download.suggestedFilename().endsWith('.mp4') });
+  expect(differences.length).toBeGreaterThan(1);
+  for (const difference of differences) expect(difference).toBeLessThan(3);
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe('montserrat-bold');
+  await expect(page.locator('.studio')).toHaveAttribute('data-state', 'paused');
+  diagnostics.verify();
+});
+
 /** First second 440 Hz, then 880 Hz: verifies excerpt offset in decoded exports. */
 function audioFixture(duration = 2.5): Buffer {
   const rate = 48000, samples = Math.round(duration * rate);

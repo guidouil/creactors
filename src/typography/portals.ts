@@ -1,6 +1,7 @@
 import { Vector2 } from 'three';
 import { outlineLayout } from './outlines';
 import { isEmoji } from './emoji';
+import { DEFAULT_FONT_ID } from './fonts';
 
 export interface PortalCandidate {
   center: readonly [number, number];
@@ -30,9 +31,9 @@ function clearance(point: Vector2, polygon: Vector2[]): number {
 }
 
 /** A real closed outline hole, not a guess from the character's identity. */
-export function findPortal(displayText: string, fontSize = 1): PortalCandidate | null {
+export function findPortal(displayText: string, fontSize = 1, fontId = DEFAULT_FONT_ID): PortalCandidate | null {
   if (isEmoji(displayText)) return null;
-  const layout = outlineLayout(displayText, fontSize);
+  const layout = outlineLayout(displayText, fontSize, fontId);
   const origin = layout.bounds.getCenter(new Vector2());
   let best: PortalCandidate | null = null;
   for (const glyph of layout.glyphs) for (const shape of glyph.shapes) for (const hole of shape.holes) {

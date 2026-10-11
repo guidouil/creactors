@@ -5,7 +5,7 @@ import { browserLocale, strings } from './app/i18n';
 import { GenerationHistory } from './app/generation-history';
 import { ExamplePicker } from './app/examples';
 import { FUTURE_POSTER_TIME, futureDemo } from './demos/future';
-import { GlyphCoverageError, loadDisplayFont, validateGlyphs } from './typography/fonts';
+import { DEFAULT_FONT_ID, GlyphCoverageError, loadDisplayFont, validateGlyphs } from './typography/fonts';
 import { measureGroups } from './typography/measure';
 import { TextDirector, type InputLanguage, type TextAnalysis } from './text/director';
 import { MotionDirector, TooLongTextError, nextRemixSeed, sceneSignature, stableSeed } from './direction/director';
@@ -223,7 +223,7 @@ function syncAudio() {
 }
 
 function syncFilm(preserveEditing = false) {
-  shell.setFilm({ text: spec.sourceText, language: spec.inputLanguage, duration: spec.duration, seed: spec.seed, themeId, secretFilm: spec.secretFilm }, preserveEditing);
+  shell.setFilm({ text: spec.sourceText, language: spec.inputLanguage, duration: spec.duration, seed: spec.seed, themeId, fontId: spec.fontId ?? DEFAULT_FONT_ID, secretFilm: spec.secretFilm }, preserveEditing);
 }
 
 /** Replace only the optional ending, retaining the existing text direction. */
@@ -300,7 +300,7 @@ async function boot() {
 const ready = boot();
 ready.catch(failRenderer);
 
-async function generate(text: string, language: InputLanguage, seed = stableSeed(text), previousSignature?: string | readonly string[], themeMode: 'seeded' | 'vary' | 'preserve' = 'seeded'): Promise<void> {
+async function generate(text: string, language: InputLanguage, seed = stableSeed(text), previousSignature?: string | readonly string[], themeMode: 'seeded' | 'vary' | 'preserve' = 'seeded', fontId = shell.getInput().fontId): Promise<void> {
   if (busy) return;
   pause();
   busy = true;
@@ -310,9 +310,10 @@ async function generate(text: string, language: InputLanguage, seed = stableSeed
     await ready;
     if (renderingFailed) throw new Error('Renderer unavailable.');
     if (!text.trim()) { showMessage(copy => copy.inputEmpty); shell.setState('error'); return; }
-    validateGlyphs(text);
+    validateGlyphs(text, fontId);
+    await loadDisplayFont(fontId);
     const nextAnalysis = TextDirector.analyze(text, language);
-    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis), themeId, seed, previousSignature);
+    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId), themeId, seed, previousSignature);
     const nextTheme = themeMode === 'preserve'
       ? resolveTheme(themeId, colorScheme)
       : selectedThemeFamily === null
@@ -360,12 +361,55 @@ shell.onExample(() => {
 shell.onCreate(() => {
   const input = shell.getInput();
   if (audioTrack) void audioPlayer.unlock().catch(() => {});
-  void generate(input.text, 'auto', generationHistory.nextSeed(input.text, spec.seed), generationHistory.signatures(input.text), 'vary');
+  void generate(input.text, 'auto', generationHistory.nextSeed(input.text, spec.seed), generationHistory.signatures(input.text), 'vary', input.fontId);
 });
 shell.onRemix(() => {
   if (!started || !analysis) return;
   if (audioTrack) void audioPlayer.unlock().catch(() => {});
-  void generate(spec.sourceText, 'auto', nextRemixSeed(spec.sourceText, spec.seed), generationHistory.signatures(spec.sourceText), 'preserve');
+  void generate(spec.sourceText, 'auto', nextRemixSeed(spec.sourceText, spec.seed), generationHistory.signatures(spec.sourceText), 'preserve', spec.fontId ?? DEFAULT_FONT_ID);
+});
+shell.onFontChange(async (fontId, applyToFilm) => {
+  if (busy || renderingFailed) throw new Error('The film is busy.');
+  if (!started || !applyToFilm) {
+    pause();
+    shell.setFont(fontId);
+    return;
+  }
+  if (fontId === (spec.fontId ?? DEFAULT_FONT_ID)) return;
+  // Validate before replacing any GPU resources, so an unsupported selection
+  // leaves the existing film, draft and playback position available.
+  validateGlyphs(spec.sourceText, fontId);
+  const resume = playing;
+  pause();
+  const previousSpec = spec;
+  const previousTime = current;
+  busy = true;
+  shell.setState('preparing', true);
+  showMessage(null);
+  try {
+    await ready;
+    const nextAnalysis = analysis ?? TextDirector.analyze(spec.sourceText, spec.inputLanguage);
+    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId), themeId, spec.seed);
+    const nextSpec = withFinalImages(nextBase, imageAssets);
+    await renderer.prepare(nextSpec);
+    baseSpec = nextBase;
+    spec = nextSpec;
+    analysis = nextAnalysis;
+    syncAudio();
+    syncFilm(true);
+    releaseDownload();
+    exportHeight = 1920;
+    draw(Math.min(previousTime / previousSpec.duration * spec.duration, spec.duration));
+    shell.setState('paused');
+    busy = false;
+    if (resume) void play();
+    window.dispatchEvent(new Event('creactors:scene'));
+  } catch (error) {
+    try { await renderer.prepare(previousSpec); draw(previousTime); shell.setState('paused'); }
+    catch (restoreError) { failRenderer(restoreError); }
+    if (error instanceof FinalImageDurationError) showMessage(copy => copy.imageDurationError);
+    throw error;
+  } finally { busy = false; followSystemAppearance(); }
 });
 shell.onTogglePlayback(() => playing ? pause() : play());
 shell.onSeekStart(startSeeking);

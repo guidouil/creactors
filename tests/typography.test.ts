@@ -1,12 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { GlyphCoverageError, validateGlyphs } from '../src/typography/fonts';
+import { DEFAULT_FONT_ID, GlyphCoverageError, getDisplayFont, listDisplayFonts, validateGlyphs } from '../src/typography/fonts';
 import { emojiCoverage, graphemes, inlineRuns, supportsEmoji } from '../src/typography/emoji';
 import { findPortal } from '../src/typography/portals';
 import { outlineLayout } from '../src/typography/outlines';
+import { measureGroups, measureLine } from '../src/typography/measure';
+import { TextDirector } from '../src/text/director';
+import { MotionDirector, stableSeed } from '../src/direction/director';
+import { FUTURE_QUOTE } from '../src/demos/future';
 import { contrastRatio, themes } from '../src/themes';
 import { Vector2 } from 'three';
 
 describe('bundled typography coverage and geometry', () => {
+  it('uses each selected font for measurements, counters and reproducible direction', () => {
+    const analysis = TextDirector.analyze(FUTURE_QUOTE, 'fr');
+    const widths: number[] = [];
+    for (const font of listDisplayFonts()) {
+      expect(() => validateGlyphs('À chaque idée, son cœur ! Œuvre, français et re\u0301ussite.', font.id)).not.toThrow();
+      const measured = measureGroups(analysis, font.id);
+      expect(measured.every(group => group.fontId === font.id && Number.isFinite(group.width))).toBe(true);
+      widths.push(measureLine('Make words move.', font.id).width);
+      const portal = findPortal('O', 1, font.id);
+      expect(portal?.radius).toBeGreaterThan(0.01);
+      const outline = outlineLayout('O', 1, font.id);
+      expect(outline.shapes.some(shape => shape.holes.length)).toBe(true);
+      const seed = stableSeed(FUTURE_QUOTE);
+      const scene = MotionDirector.direct(analysis, measured, 'califormandy-sunset', seed);
+      expect(scene.fontVersion).toBe(getDisplayFont(font.id).version);
+      if (font.id !== DEFAULT_FONT_ID) {
+        expect(scene.fontId).toBe(font.id);
+        expect(scene.generatorVersion).toMatch(/^spatial-grammar/);
+        expect(scene.seed).toBe(seed);
+      }
+      expect(MotionDirector.direct(analysis, measured, 'califormandy-sunset', seed)).toEqual(scene);
+    }
+    expect(new Set(widths).size).toBe(4);
+    // Alternating selections must not reuse another font's measurement cache.
+    expect(measureLine('Make words move.').width).toBe(widths[0]);
+  });
   it('accepts French typography and normalized rendering without changing the input', () => {
     const text = "L’IMAGINATION : re\u0301pe\u0301tons, cœur, Œ !";
     expect(() => validateGlyphs(text)).not.toThrow();
