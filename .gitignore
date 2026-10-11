@@ -1,0 +1,11 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+artifacts/
+.DS_Store
+.font-tools/
+dist-static/
+.env
+.env.*
+!.env.example

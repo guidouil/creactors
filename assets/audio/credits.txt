@@ -1,0 +1,66 @@
+CREACTORS — bundled audio notices
+
+All six runtime copies are AAC-LC 96 kbps, stereo 44.1 kHz, embedded in the HTML.
+Selected passages may repeat to cover longer films.
+
+Monkeys Spinning Monkeys
+Author: Kevin MacLeod
+Source: https://www.incompetech.com/music/royalty-free/index.html?isrc=USUAN1400011
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+Selection: First 16 measures at 144 BPM.
+Runtime copy: monkeys-spinning-monkeys.m4a, approximately 26.67 seconds.
+Modification: source passage extracted; 10 ms anti-click fades at start and end; re-encoded to AAC-LC 96 kbps.
+Publication attribution:
+Monkeys Spinning Monkeys — Kevin MacLeod (incompetech.com). Licensed under Creative Commons: By Attribution 4.0 License. https://creativecommons.org/licenses/by/4.0/ First 16 measures extracted (26.67 seconds); 10 ms anti-click fades; re-encoded to AAC-LC 96 kbps. The passage may repeat to cover the video.
+
+Sneaky Snitch
+Author: Kevin MacLeod
+Source: https://www.incompetech.com/music/royalty-free/index.html?isrc=USUAN1100772
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+Selection: First 8 measures at 87 BPM.
+Runtime copy: sneaky-snitch.m4a, approximately 22.07 seconds.
+Modification: source passage extracted; 10 ms anti-click fades at start and end; re-encoded to AAC-LC 96 kbps.
+Publication attribution:
+Sneaky Snitch — Kevin MacLeod (incompetech.com). Licensed under Creative Commons: By Attribution 4.0 License. https://creativecommons.org/licenses/by/4.0/ First 8 measures extracted (22.07 seconds); 10 ms anti-click fades; re-encoded to AAC-LC 96 kbps. The passage may repeat to cover the video.
+
+Phonk Time
+Author: Play House
+Source: https://freemusicarchive.org/music/play-house/single/phonk-time/
+License: Creative Commons CC0 1.0 Universal Public Domain Dedication
+License URL: https://creativecommons.org/publicdomain/zero/1.0/
+Selection: Passage from 7.5 to 37.5 seconds; 128 BPM estimated from audio, not author metadata.
+Runtime copy: phonk-time.m4a, approximately 30.00 seconds.
+Modification: source passage extracted; 10 ms anti-click fades at start and end; re-encoded to AAC-LC 96 kbps. Attenuated by 8 dB for headroom.
+Acknowledgement (attribution is not required):
+Phonk Time — Play House. CC0 1.0. https://freemusicarchive.org/music/play-house/single/phonk-time/ Excerpt from 7.5 to 37.5 seconds; 8 dB attenuation for headroom; 10 ms anti-click fades; re-encoded to AAC-LC 96 kbps. The passage may repeat to cover the video.
+
+Synthwave House Loop
+Author: Fupi
+Source: https://opengameart.org/content/synthwave-house-loop
+License: Creative Commons CC0 1.0 Universal Public Domain Dedication
+License URL: https://creativecommons.org/publicdomain/zero/1.0/
+Selection: First 12 measures at 114 BPM.
+Runtime copy: synthwave-house.m4a, approximately 25.26 seconds.
+Modification: source passage extracted; 10 ms anti-click fades at start and end; re-encoded to AAC-LC 96 kbps.
+Acknowledgement (attribution is not required):
+Synthwave House Loop — Fupi. CC0 1.0. https://opengameart.org/content/synthwave-house-loop First 12 measures extracted (25.26 seconds); 10 ms anti-click fades; re-encoded to AAC-LC 96 kbps. The passage may repeat to cover the video.
+
+Oh no
+Source: exact user-provided MP3 supplied on 10 October 2026; archived separately in assets/audio-sources/oh-no.mp3.
+Original size: 292861 bytes.
+Original SHA-256: 4218457474baaaa9fd7cc55b905872d3398ff40263202e856717a539b85facb0
+No public license or author attribution is inferred for this user-provided recording.
+Selection: Complete user-supplied recording, not a longer replacement.
+Runtime copy: oh-no.m4a, approximately 18.26 seconds.
+Modification: complete decoded supplied recording recompressed to AAC-LC 96 kbps; 10 ms entrance anti-click fade. The original MP3 bytes remain unchanged in the source archive.
+
+Générique de fin
+Source: exact user-provided MP3 supplied on 10 October 2026; archived separately in assets/audio-sources/meme-de-creditos-finales.mp3.
+Original size: 163821 bytes.
+Original SHA-256: d0441222c2e0c8d76899754c777c14a2ad548cf1b4cfef460d6af2f4b2c852ed
+No public license or author attribution is inferred for this user-provided recording.
+Selection: Complete user-supplied recording, not a longer replacement.
+Runtime copy: meme-de-creditos-finales.m4a, approximately 10.18 seconds.
+Modification: complete decoded supplied recording recompressed to AAC-LC 96 kbps; 10 ms entrance anti-click fade. The original MP3 bytes remain unchanged in the source archive.
