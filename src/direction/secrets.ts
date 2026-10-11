@@ -1,4 +1,4 @@
-import type { CameraTrack, SceneObject, SceneSpec, Vec3 } from '../scene/types';
+import type { CameraTrack, MotionKeyframe, SceneObject, SceneSpec, Vec3 } from '../scene/types';
 
 export type SecretFilmId = 'gravity' | 'boomerang' | 'vertigo' | 'tunnel' | 'supernova' | 'seventh-face';
 
@@ -51,44 +51,64 @@ function mix(a: Vec3, b: Vec3, amount: number): Vec3 {
   return [a[0] + (b[0] - a[0]) * amount, a[1] + (b[1] - a[1]) * amount, a[2] + (b[2] - a[2]) * amount];
 }
 
+/** Size gestures in the portrait frame, rather than in arbitrary world units. */
+function frameSize(object: SceneObject, index: number, spec: SceneSpec, poster = false) {
+  const track = spec.cameraTracks.find(track => track.id === (poster ? 'poster' : `read-${index}`));
+  const p = poster ? object.assembly?.position ?? object.position : object.position;
+  const distance = Math.max(6, (track?.to.position[2] ?? p[2] + 18) - p[2]);
+  const height = distance * Math.tan(spec.fov * Math.PI / 360);
+  return { distance, height, width: height * spec.aspect };
+}
+
 function secretEntrance(object: SceneObject, index: number, spec: SceneSpec, id: SecretFilmId): SceneObject['entrance'] {
   if (!object.entrance) return undefined;
   const original = object.entrance;
   const p = object.position;
   const side = (index % 2 ? -1 : 1) * (spec.directionStyle?.handedness ?? 1);
-  // Keep every starting plane behind the opening camera. Later words perform
-  // their arrival immediately before their own hold, instead of off screen.
-  const previous = spec.objects[index - 1];
-  const start = index === 0 ? original.start : Math.max(original.start, previous?.readingInterval[1] ?? original.start);
+  const { distance: d, width: w, height: h } = frameSize(object, index, spec);
+  const start = index === 0 ? original.start : Math.max(original.start, spec.objects[index - 1]?.readingInterval[1] ?? original.start);
   const end = object.readingInterval[0];
   if (end <= start) return original;
-  const base = { ...original, start, end };
+  const point = (at: number, x: number, y: number, z: number, turn: number, scale: number): MotionKeyframe => ({
+    at, position: add(p, x, y, z), rotation: [0, 0, turn], scale: object.scale * scale,
+  });
+  let keyframes: MotionKeyframe[];
   switch (id) {
-    case 'gravity': return {
-      ...base, from: add(original.from, -side * 8, 10), rotation: [side * 0.55, -side * 0.3, side * 1.65], scale: 0.64, easing: 'smooth',
-      controls: [add(original.from, side * 8, 13, -8), add(p, -side * 3, -2, 5)],
-    };
-    case 'boomerang': return {
-      ...base, from: add(original.from, -side * 18, 1), rotation: [0.15, side * 0.5, -side * 0.85], scale: 0.85, easing: 'smooth',
-      controls: [add(p, side * 22, 4, 11), add(p, -side * 10, -2, 4)],
-    };
-    case 'vertigo': return {
-      ...base, from: add(original.from, side * 4, 4), rotation: [side * 0.4, -side * 0.65, side * Math.PI * 2], scale: 0.5,
-      controls: [add(p, -side * 9, 8, 18), add(p, side * 6, -4, 6)],
-    };
-    case 'tunnel': return {
-      ...base, from: add(original.from, 0, 0, 28), rotation: [0, side * 0.3, 0], scale: 0.34,
-      controls: [add(p, -side * 2, 0, -48), add(p, side * 1, 0, -16)],
-    };
-    case 'supernova': return {
-      ...base, from: add(original.from, side * 12, -7), rotation: [0, side * 0.6, side * 0.45], scale: 0.22, easing: 'accelerate',
-      controls: [add(original.from, -side * 5, 3, -12), add(p, side * 2, -1, 3)],
-    };
-    case 'seventh-face': return {
-      ...base, from: add(original.from, side * 7, 7), rotation: [side * Math.PI / 7, side * Math.PI * 2 / 7, side * Math.PI * 2], scale: 0.7,
-      controls: [add(p, side * 14, -7, 21), add(p, -side * 7, 4, 7)],
-    };
+    case 'gravity':
+      keyframes = [point(.16, side * w * .1, -h * .36, -d * .45, -side * .2, .68),
+        point(.5, -side * w * .08, h * .14, -d * .15, side * .15, .86),
+        point(.8, 0, -h * .04, 0, -side * .04, .98)];
+      break;
+    case 'boomerang':
+      keyframes = [point(.16, -side * w * .32, h * .08, -d * .35, -side * .3, .58),
+        point(.44, side * w * .32, h * .03, -d * .12, side * .24, .7),
+        point(.72, -side * w * .12, -h * .03, -d * .05, -side * .1, .88)];
+      break;
+    case 'vertigo':
+      keyframes = [point(.16, 0, 0, -d * .5, side * Math.PI * 1.5, .5),
+        point(.5, 0, 0, -d * .3, side * Math.PI * .65, .58),
+        point(.82, 0, 0, -d * .06, side * .15, .88)];
+      break;
+    case 'tunnel':
+      keyframes = [point(.16, 0, 0, -d * 1.8, 0, .6),
+        point(.5, 0, 0, -d * .65, 0, .8), point(.8, 0, 0, -d * .12, 0, 1)];
+      break;
+    case 'supernova':
+      keyframes = [point(.16, 0, 0, -d * .6, 0, .18),
+        point(.38, 0, 0, -d * .3, 0, .26),
+        point(.7, 0, 0, -d * .1, -side * .08, 1.06)];
+      break;
+    case 'seventh-face':
+      keyframes = [point(.16, -side * w * .16, h * .18, -d * .35, side * Math.PI * 2 / 7, .58),
+        point(.5, side * w * .16, -h * .1, -d * .12, -side * Math.PI / 7, .76),
+        point(.78, -side * w * .05, h * .02, -d * .05, side * .14, .9)];
+      break;
   }
+  // Only the initial plane is behind the opening camera. The first visible beat
+  // is small and inside the frame; subsequent beats have time to be seen.
+  // Cross the lens at zero scale to avoid a one-frame wall of oversized letters.
+  return { ...original, start, end, rotation: [0, 0, 0], scale: 0,
+    controls: undefined, keyframes: [point(.08, 0, 0, -d * .8, 0, 0), ...keyframes], easing: 'smooth' };
 }
 
 function secretExit(object: SceneObject, index: number, spec: SceneSpec, id: SecretFilmId): SceneObject['exit'] {
@@ -97,74 +117,89 @@ function secretExit(object: SceneObject, index: number, spec: SceneSpec, id: Sec
   const p = object.assembly?.position ?? object.position;
   const scale = object.assembly?.scale ?? object.scale;
   const side = (index % 2 ? -1 : 1) * (spec.directionStyle?.handedness ?? 1);
-  const span = original.to[2] - p[2];
-  // Preserve the safe terminal depth and original exit window: the loop remains
-  // empty and optional final photographs can use the existing spatial handoff.
+  const { distance: d, width: w, height: h } = frameSize(object, index, spec, true);
+  const point = (at: number, position: Vec3, turn: number, size = 1): MotionKeyframe => ({
+    at, position, rotation: [0, 0, turn], scale: scale * size,
+  });
+  const start = spec.cameraTracks.find(track => track.id === 'poster')?.end ?? original.start;
+  let keyframes: MotionKeyframe[];
   switch (id) {
-    case 'gravity': return {
-      ...original, to: [p[0] + side * 10, p[1] + 16, original.to[2]], rotation: [side * 0.4, 0.2, side * 1.5], scale, easing: 'accelerate',
-      controls: [add(p, side * 3, 4, span * 0.06), add(p, -side * 4, 10, span * 0.24)],
-    };
-    case 'boomerang': return {
-      ...original, to: [p[0] + side * 4, p[1], original.to[2]], rotation: [0, side * 0.35, side * Math.PI], scale, easing: 'smooth',
-      controls: [add(p, side * 19, 5, span * 0.04), add(p, -side * 14, -4, span * 0.2)],
-    };
-    case 'vertigo': return {
-      ...original, rotation: [side * 0.6, -side * 0.4, side * Math.PI * 4], scale: scale * 1.05,
-      controls: [add(p, -side * 6, 5, span * 0.12), add(p, side * 6, -5, span * 0.48)],
-    };
-    case 'tunnel': return {
-      ...original, to: [p[0] * 0.2, p[1] * 0.2, original.to[2]], rotation: [0, 0, 0], scale, easing: 'accelerate',
-      controls: [add(p, 0, 0, -Math.min(8, span * 0.1)), [p[0] * 0.35, p[1] * 0.35, p[2] + span * 0.25]],
-    };
+    case 'gravity':
+      keyframes = [point(.22, add(p, side * w * .06, h * .1), side * .08, .96),
+        point(.55, add(p, -side * w * .08, h * .24, -d * .06), -side * .12, .82),
+        point(.78, add(p, 0, h * .4, -d * .12), side * .18, .58)];
+      break;
+    case 'boomerang':
+      keyframes = [point(.24, add(p, side * w * .24, h * .04, -d * .08), side * .22, .8),
+        point(.5, add(p, -side * w * .24, -h * .04, -d * .08), -side * .22, .8),
+        point(.74, p, 0)];
+      break;
+    case 'vertigo': {
+      const orbit = (angle: number): Vec3 => [p[0] * Math.cos(angle) - p[1] * Math.sin(angle),
+        p[0] * Math.sin(angle) + p[1] * Math.cos(angle), p[2] - d * .2];
+      keyframes = [point(.22, orbit(side * Math.PI * .4), side * Math.PI * .4, .62),
+        point(.52, orbit(side * Math.PI * 1.6), side * Math.PI * 1.6, .62),
+        point(.76, p, side * Math.PI * 2, .75)];
+      break;
+    }
+    case 'tunnel':
+      keyframes = [point(.3, [p[0] * .65, p[1] * .65, p[2] - d * .35], 0, .8),
+        point(.65, [p[0] * .2, p[1] * .2, p[2] - d * .7], 0, .55),
+        point(.8, [p[0] * .1, p[1] * .1, p[2] - d * .8], 0, .4)];
+      break;
     case 'supernova': {
-      const angle = index * 2.399963 + (spec.seed % 7) * Math.PI / 7;
-      const x = Math.cos(angle) * (11 + index * 2);
-      const y = Math.sin(angle) * (11 + index * 2);
-      return {
-        ...original, to: [p[0] + x * 1.8, p[1] + y * 1.8, original.to[2]], rotation: [Math.sin(angle) * 0.7, Math.cos(angle) * 0.7, side * 1.2], scale: scale * 1.16, easing: 'accelerate',
-        controls: [add(p, -x * 0.06, -y * 0.06, -0.5), add(p, x, y, span * 0.25)],
-      };
+      const angle = index * Math.PI * 2 / spec.objects.length + (spec.seed % 7) * Math.PI / 7;
+      keyframes = [point(.24, [p[0] * .55, p[1] * .55, p[2] - d * .14], 0, .36),
+        point(.44, [p[0] * .25, p[1] * .25, p[2] - d * .18], 0, .25),
+        point(.76, add(p, Math.cos(angle) * w * .3, Math.sin(angle) * h * .22), side * .2, .85)];
+      break;
     }
-    case 'seventh-face': {
-      const angle = (index + 1) * Math.PI * 2 / 7;
-      return {
-        ...original, to: [p[0] + Math.cos(angle) * 14, p[1] + Math.sin(angle) * 14, original.to[2]],
-        rotation: [side * Math.PI / 7, side * Math.PI * 2 / 7, side * Math.PI * 2], scale: scale * 1.07,
-        controls: [add(p, Math.cos(angle) * 7, Math.sin(angle) * 7, span * 0.09), add(p, Math.cos(angle + Math.PI * 2 / 7) * 14, Math.sin(angle + Math.PI * 2 / 7) * 14, span * 0.4)],
-      };
-    }
+    case 'seventh-face':
+      keyframes = Array.from({ length: 7 }, (_, step) => {
+        const angle = side * (step + 1) * Math.PI * 2 / 7;
+        return { ...point((step + 1) * .1, add(p, Math.sin(angle) * w * .14, (Math.cos(angle) - 1) * h * .08, -d * .15),
+          angle, .62), easing: 'linear' as const };
+      });
+      break;
   }
+  // The visible gesture completes before the final rush through the lens. Its
+  // terminal plane remains safely behind the camera for looping/photo endings.
+  const turn = id === 'vertigo' || id === 'seventh-face' ? side * Math.PI * 2 : 0;
+  return { ...original, start, to: [p[0], p[1], original.to[2]], rotation: [0, 0, turn],
+    scale, controls: undefined, keyframes, easing: 'cinematic' };
 }
 
 function secretTrack(track: CameraTrack, spec: SceneSpec, id: SecretFilmId): CameraTrack {
   if (track.primitive === 'HOLD' || track.primitive === 'CUT' || track.primitive === 'PORTAL') return track;
   const direction = spec.directionStyle?.handedness ?? 1;
-  // Endpoint poses never move: authored reading frames, continuity and poster
-  // framing remain valid. All flourishes settle at the existing boundaries.
+  // Keep endpoint poses and portal crossings: flourishes always settle into
+  // the existing reading shot, without throwing the camera out of the frame.
   const base = { ...track, rollTurns: undefined };
+  const distance = Math.max(8, track.to.position[2] - track.to.target[2]);
+  const h = distance * Math.tan(spec.fov * Math.PI / 360);
+  const w = h * spec.aspect;
   if (id === 'gravity' && track.id === 'impact') return {
     ...base, easing: 'smooth', impact: undefined, trackTarget: true,
-    controls: [add(track.from.position, -direction * 3, 2, 2), add(track.to.position, direction * 2, -2, 1)],
+    controls: [add(mix(track.from.position, track.to.position, .3), -direction * w * .08, h * .12),
+      add(mix(track.from.position, track.to.position, .7), direction * w * .06, -h * .06)],
   };
   if (id === 'boomerang' && track.id === 'reveal-flight') return {
-    ...base, controls: [add(mix(track.from.position, track.to.position, 0.25), direction * 7, 2, 5), add(mix(track.from.position, track.to.position, 0.75), -direction * 7, -2, 5)],
+    ...base, controls: [add(mix(track.from.position, track.to.position, .3), direction * w * .18, h * .04, 2),
+      add(mix(track.from.position, track.to.position, .7), -direction * w * .18, -h * .04, 2)],
   };
-  if (id === 'vertigo' && track.id === 'reveal-flight') return { ...base, rollTurns: direction };
-  if (id === 'tunnel' && (track.id.startsWith('travel-') || track.id === 'impact')) {
-    const nearDepth = Math.max(track.from.target[2], track.to.target[2]) + 8;
-    const first = mix(track.from.position, track.to.position, 0.32);
-    const second = mix(track.from.position, track.to.position, 0.68);
-    return {
-      ...base, primitive: 'TUNNEL', trackTarget: true,
-      controls: [[first[0], first[1], nearDepth], [second[0], second[1], nearDepth]],
-    };
-  }
+  if (id === 'vertigo' && track.id === 'reveal-flight') return {
+    ...base, rollTurns: direction,
+    controls: [add(mix(track.from.position, track.to.position, .3), 0, 0, 2),
+      add(mix(track.from.position, track.to.position, .7), 0, 0, 2)],
+  };
+  if (id === 'tunnel' && track.id.startsWith('travel-')) return { ...base, primitive: 'TUNNEL' };
   if (id === 'supernova' && track.id.startsWith('finale-')) return {
-    ...base, impact: { start: track.start, end: Math.min(track.end, track.start + 0.3), displacement: [0, 0, -1.2], rotation: [direction * 0.025, 0, direction * 0.045] },
+    ...base, impact: { start: track.start, end: Math.min(track.end, track.start + .3),
+      displacement: [0, 0, -.4], rotation: [direction * .012, 0, direction * .02] },
   };
   if (id === 'seventh-face' && track.id === 'reveal-flight') return {
-    ...base, controls: [add(track.from.position, direction * 7, -7, 7), add(track.to.position, -direction * 7, 7, 7)],
+    ...base, controls: [add(mix(track.from.position, track.to.position, .3), direction * w * .12, -h * .08, 2),
+      add(mix(track.from.position, track.to.position, .7), -direction * w * .12, h * .08, 2)],
   };
   return base;
 }
@@ -183,7 +218,7 @@ export function applySecretFilm(spec: SceneSpec): SceneSpec {
     } : {}),
   }));
   return {
-    ...spec, generatorVersion: `${spec.generatorVersion}+secrets-1`, secretFilm: film.id, objects,
+    ...spec, generatorVersion: `${spec.generatorVersion}+secrets-2`, secretFilm: film.id, objects,
     cameraTracks: spec.cameraTracks.map(track => secretTrack(track, spec, film.id)),
     ...(spec.directionStyle ? { directionStyle: {
       ...spec.directionStyle,

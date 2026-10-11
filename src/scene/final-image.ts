@@ -5,8 +5,8 @@ import type { CameraPose, FinalImageObject, SceneSpec, Vec3 } from './types';
 
 export const MAX_FINAL_IMAGES = MAX_IMAGE_COUNT;
 export const FINAL_IMAGE_TIMING = Object.freeze({ entrance: 0.7, hold: 0.45, exit: 0.6, blank: 0.15 });
-// The first photo catches the words as they leave; subsequent photo flights keep
-// their longer travel so two large planes do not arrive simultaneously.
+// The first photo catches the final text rush; intermediate text gestures finish
+// before that bridge. Subsequent photo flights keep their longer travel.
 export const FINAL_IMAGE_BRIDGE_ENTRANCE = 0.4;
 // The next photograph approaches while its predecessor accelerates past the lens.
 export const FINAL_IMAGE_STRIDE = FINAL_IMAGE_TIMING.entrance + FINAL_IMAGE_TIMING.hold;
@@ -69,7 +69,15 @@ export function withFinalImages(spec: SceneSpec, assets: readonly ImageAsset[]):
     Math.max(object.readingInterval[1], object.assembly?.end ?? 0)));
   const departures = base.objects.flatMap(object =>
     object.exit && object.exit.start >= protectedEnd ? [object.exit] : []);
-  const firstStart = departures.length ? Math.min(...departures.map(exit => exit.start)) : base.duration;
+  const departureStart = departures.length ? Math.min(...departures.map(exit => exit.start)) : base.duration;
+  // A keyframed departure can perform a visible gesture before its final rush.
+  // Starting the photo at the departure's opening would put an opaque plane
+  // in front of those words while the gesture is still playing.
+  const gestureEnds = departures.flatMap(exit => {
+    const last = exit.keyframes?.at(-1);
+    return last ? [exit.start + (exit.end - exit.start) * last.at] : [];
+  });
+  const firstStart = Math.max(departureStart, ...gestureEnds);
   const textExitEnd = departures.length ? Math.max(...departures.map(exit => exit.end)) : base.duration;
   const firstEntranceDuration = departures.length ? FINAL_IMAGE_BRIDGE_ENTRANCE : FINAL_IMAGE_TIMING.entrance;
   const firstEntranceEnd = firstStart + firstEntranceDuration;

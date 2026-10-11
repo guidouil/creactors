@@ -237,7 +237,11 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
         </section>
         <aside class="edition" aria-hidden="true"><span class="edition-line"></span><span class="edition-label">CREACTORS / 001</span><span class="sunset-stamp"><span></span></span></aside>
       </main>
-      <footer class="studio-footer"><span class="footer-credit"></span><span class="footer-index" aria-hidden="true">© CREACTORS</span></footer>
+      <footer class="studio-footer">
+        <span class="footer-credit"></span>
+        <a class="footer-source" href="https://github.com/guidouil/creactors" target="_blank" rel="noopener noreferrer"><span class="footer-source-label"></span>${icon('arrow')}</a>
+        <span class="footer-index" aria-hidden="true">© CREACTORS</span>
+      </footer>
       <dialog id="studio-help" class="help-dialog" aria-labelledby="help-title">
         <div class="help-heading"><h2 id="help-title"></h2><button class="help-close icon-button" type="button" autofocus>${icon('cancel')}</button></div>
         <ul class="help-list">
@@ -850,6 +854,8 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     find<HTMLElement>('.demo-label').textContent = copy.demo;
     find<HTMLElement>('.create-label').textContent = copy.create;
     find<HTMLElement>('.footer-credit').textContent = copy.credit;
+    find<HTMLElement>('.footer-source-label').textContent = copy.sourceCode;
+    find<HTMLAnchorElement>('.footer-source').setAttribute('aria-label', copy.sourceCodeLabel);
     find<HTMLElement>('.film-duration').textContent = copy.duration(Math.round(duration * 10) / 10);
     const secretBadge = find<HTMLElement>('.film-secret');
     secretBadge.hidden = !activeSecret;

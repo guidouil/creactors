@@ -4,7 +4,7 @@ import { futureDemo } from '../src/demos/future';
 import { MotionDirector } from '../src/direction/director';
 import type { ImageAsset } from '../src/image/types';
 import { evaluateScene } from '../src/scene/evaluator';
-import { FINAL_IMAGE_DURATION, FINAL_IMAGE_STRIDE, FINAL_IMAGE_TIMING, FinalImageDurationError, finalImagesDuration, withFinalImages } from '../src/scene/final-image';
+import { FINAL_IMAGE_BRIDGE_ENTRANCE, FINAL_IMAGE_DURATION, FINAL_IMAGE_STRIDE, FINAL_IMAGE_TIMING, FinalImageDurationError, finalImagesDuration, withFinalImages } from '../src/scene/final-image';
 import type { SceneSpec } from '../src/scene/types';
 import { TextDirector } from '../src/text/director';
 import { measureGroups, measureLine } from '../src/typography/measure';
@@ -41,6 +41,76 @@ describe('optional final image choreography', () => {
     expect(evaluateScene(spec, futureDemo.posterTime!).finalImages?.[0]?.visible).toBe(false);
     expect(spec.cameraTracks.slice(0, -1)).toEqual(futureDemo.cameraTracks);
     expect(spec.chapters.map(chapter => chapter.time)).toEqual(spec.chapters.map(chapter => chapter.time).sort((a, b) => a - b));
+  });
+
+  it.each([
+    'La gravité est une suggestion.', 'Les mots reviennent toujours.', 'Les mots ont le vertige.',
+    'Il y a un monde derrière les lettres.', 'Une petite phrase peut devenir une supernova.',
+    'Même le hasard cache quelque chose.',
+  ])('keeps the visible secret departure unobstructed before the first photo: %s', text => {
+    for (const seed of [1, 7, 11]) {
+      const analysis = TextDirector.analyze(text);
+      const base = MotionDirector.direct(analysis, measureGroups(analysis), 'califormandy-sunset', seed);
+      const saved = JSON.stringify(base);
+      const spec = withFinalImages(base, [asset, { ...asset, name: 'next.png' }]);
+      const first = spec.finalImages![0]!;
+      const gestureEnd = Math.max(...base.objects.map(object => {
+        const exit = object.exit!;
+        return exit.start + (exit.end - exit.start) * exit.keyframes!.at(-1)!.at;
+      }));
+      expect(first.entrance.start).toBeCloseTo(gestureEnd, 12);
+      expect(first.entrance.end - first.entrance.start).toBeCloseTo(FINAL_IMAGE_BRIDGE_ENTRANCE, 12);
+      // The photo must not cover any frame of the visible text motif, including
+      // a later object's final beat. State preservation alone would miss that.
+      const start = Math.min(...base.objects.map(object => object.exit!.start));
+      for (let frame = Math.ceil(start * spec.fps); frame / spec.fps < gestureEnd; frame++) {
+        const time = frame / spec.fps;
+        const { finalImages, ...state } = evaluateScene(spec, time);
+        expect(finalImages![0]!.visible).toBe(false);
+        expect(state).toEqual(evaluateScene(base, time));
+      }
+      for (const object of base.objects) for (const keyframe of object.exit!.keyframes!) {
+        const time = object.exit!.start + (object.exit!.end - object.exit!.start) * keyframe.at;
+        const photo = evaluateScene(spec, time).finalImages![0]!;
+        expect(!photo.visible || photo.scale === 0).toBe(true);
+      }
+      expect(evaluateScene(spec, base.posterTime!).finalImages![0]!.visible).toBe(false);
+      expect(first.exit.start - first.entrance.end).toBeGreaterThanOrEqual(FINAL_IMAGE_TIMING.hold - 1e-10);
+      expect(spec.finalImages![1]!.entrance.start).toBe(first.exit.start);
+      expect(spec.objects).toBe(base.objects);
+      expect(withFinalImages(spec, [])).toEqual(base);
+      expect(withFinalImages(spec, [asset]).duration).toBe(withFinalImages(base, [asset]).duration);
+      expect(JSON.stringify(base)).toBe(saved);
+    }
+  });
+
+  it('retains the existing text/photo bridge for departures without intermediate beats', () => {
+    const empty: SceneSpec = {
+      ...futureDemo,
+      objects: futureDemo.objects.map(object => ({ ...object, exit: { ...object.exit!, keyframes: [] } })),
+    };
+    const legacy = withFinalImages(futureDemo, [asset]);
+    const spec = withFinalImages(empty, [asset]);
+    expect(spec.finalImages).toEqual(legacy.finalImages);
+    expect(spec.duration).toBe(legacy.duration);
+    expect(spec.posterTime).toBe(legacy.posterTime);
+  });
+
+  it('includes the delayed first photo arrival in the sixty-second limit', () => {
+    const lateGesture = (duration: number): SceneSpec => ({
+      ...futureDemo, duration,
+      objects: futureDemo.objects.map(object => ({ ...object, exit: {
+        ...object.exit!, start: duration - .9, end: duration - .1,
+        keyframes: [{ at: .9, position: object.assembly!.position }],
+      } })),
+    });
+    // The last beat is 0.18 s before the base end, so the 0.4 s arrival extends
+    // beyond it. A full hold, departure and blank still follow that arrival.
+    const extension = FINAL_IMAGE_BRIDGE_ENTRANCE - .18
+      + FINAL_IMAGE_TIMING.hold + FINAL_IMAGE_TIMING.exit + FINAL_IMAGE_TIMING.blank;
+    const maximumBase = 60 - extension;
+    expect(withFinalImages(lateGesture(maximumBase), [asset]).duration).toBeCloseTo(60, 12);
+    expect(() => withFinalImages(lateGesture(maximumBase + .01), [asset])).toThrow(FinalImageDurationError);
   });
 
   it('is empty at both loop ends and physically passes behind the frozen camera', () => {

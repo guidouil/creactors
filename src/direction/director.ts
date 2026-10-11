@@ -94,8 +94,8 @@ export function sceneSignature(spec: SceneSpec): string {
     styles: spec.directionStyle,
     placements: spec.objects.map(object => object.position.map(value => Math.round(value * 2) / 2)),
     rotations: spec.objects.map(object => object.rotation.map(value => Math.round(value * 100) / 100)),
-    arrivals: spec.objects.map(object => [object.entrance?.rotation, object.entrance?.scale]),
-    finales: spec.objects.map(object => [object.exit?.rotation, object.exit?.controls?.map(point => point.map(value => Math.round(value))), object.exit?.scale]),
+    arrivals: spec.objects.map(object => [object.entrance?.rotation, object.entrance?.scale, object.entrance?.keyframes]),
+    finales: spec.objects.map(object => [object.exit?.rotation, object.exit?.controls?.map(point => point.map(value => Math.round(value))), object.exit?.scale, object.exit?.keyframes]),
     shots: spec.cameraTracks.filter(track => track.primitive !== 'HOLD').map(track => [track.primitive, track.cutBefore ?? false, track.rollTurns ?? 0, track.trackTarget ?? false, track.focusObjectId, Math.round(track.to.roll * 100) / 100, track.to.position.map(value => Math.round(value)), track.controls?.map(point => point.map(value => Math.round(value)))]),
   });
 }

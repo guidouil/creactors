@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Euler, Quaternion, Vector3 } from 'three';
 import { futureDemo, FUTURE_POSTER_TIME, FUTURE_QUOTE } from '../src/demos/future';
 import { evaluateScene } from '../src/scene/evaluator';
-import type { CameraPose, SceneSpec } from '../src/scene/types';
+import type { CameraPose, EvaluatedObject, SceneSpec } from '../src/scene/types';
 
 const kineticPose: CameraPose = { position: [0, 0, 9], target: [0, 0, 0], roll: 0 };
 const kineticScene: SceneSpec = {
@@ -265,6 +265,117 @@ describe('kinetic transform extensions', () => {
       [...expected.camera.position, ...expected.camera.quaternion, ...expected.objects[0].position, ...expected.objects[0].rotation, expected.objects[0].scale]
         .forEach(value => expect(Number.isFinite(value)).toBe(true));
       expect(expected.objects[0].scale).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('piecewise object trajectories', () => {
+  const scene: SceneSpec = {
+    ...kineticScene,
+    duration: 8,
+    objects: [{
+      ...kineticScene.objects[0],
+      rotation: [0, 0, 1],
+      impact: undefined,
+      entrance: {
+        start: 1, end: 3, from: [-10, 0, 8], rotation: [0, 0, 5], scale: 0.2,
+        controls: [[100, 100, 100], [-100, -100, -100]],
+        easing: 'accelerate',
+        keyframes: [
+          { at: 0.18, position: [-6, 3, 4], rotation: [0, 0, 7], scale: 0.6, easing: 'linear' },
+          { at: 0.5, position: [5, 2, 1], easing: 'smooth' },
+          { at: 0.8, position: [-1, -2, 0], rotation: [0, 1, 0], scale: 1.2 },
+        ],
+      },
+      assembly: { start: 3.5, end: 4.5, position: [2, 4, 0], rotation: [0, 1, 2], scale: 0.6, easing: 'cinematic' },
+      exit: {
+        start: 5, end: 7, to: [20, -5, 50], rotation: [2, 3, 4], scale: 1.8,
+        controls: [[100, 100, 100], [-100, -100, -100]],
+        easing: 'accelerate',
+        keyframes: [
+          { at: 0.18, position: [7, 3, 4], easing: 'linear' },
+          { at: 0.5, position: [-3, 0, 8], rotation: [1, 2, 3], scale: 0.3, easing: 'smooth' },
+          { at: 0.8, position: [6, -2, 30] },
+        ],
+      },
+    }],
+    cameraTracks: [{ id: 'fixed', start: 0, end: 8, primitive: 'HOLD', from: kineticPose, to: kineticPose, easing: 'linear' }],
+  };
+  const object = scene.objects[0];
+
+  function expectTransform(actual: EvaluatedObject, expected: Pick<EvaluatedObject, 'position' | 'rotation' | 'scale'>) {
+    actual.position.forEach((value, axis) => expect(value).toBeCloseTo(expected.position[axis], 12));
+    actual.rotation.forEach((value, axis) => expect(value).toBeCloseTo(expected.rotation[axis], 12));
+    expect(actual.scale).toBeCloseTo(expected.scale, 12);
+  }
+
+  it('hits authored knots at their linear times, with exact implicit endpoints and endpoint defaults', () => {
+    const entrance = object.entrance!;
+    expectTransform(evaluateScene(scene, 0.5).objects[0], { position: entrance.from, rotation: entrance.rotation!, scale: entrance.scale! });
+    expectTransform(evaluateScene(scene, 1).objects[0], { position: entrance.from, rotation: entrance.rotation!, scale: entrance.scale! });
+    expectTransform(evaluateScene(scene, 1.36).objects[0], { position: [-6, 3, 4], rotation: [0, 0, 7], scale: 0.6 });
+    expectTransform(evaluateScene(scene, 2).objects[0], { position: [5, 2, 1], rotation: [0, 0, 3], scale: 0.6 });
+    expectTransform(evaluateScene(scene, 2.6).objects[0], { position: [-1, -2, 0], rotation: [0, 1, 0], scale: 1.2 });
+    expectTransform(evaluateScene(scene, 3).objects[0], object);
+
+    expectTransform(evaluateScene(scene, 5).objects[0], object.assembly!);
+    expectTransform(evaluateScene(scene, 5.36).objects[0], { position: [7, 3, 4], rotation: [0.36, 1.36, 2.36], scale: 0.816 });
+    expectTransform(evaluateScene(scene, 6).objects[0], { position: [-3, 0, 8], rotation: [1, 2, 3], scale: 0.3 });
+    expectTransform(evaluateScene(scene, 6.6).objects[0], { position: [6, -2, 30], rotation: [1.6, 2.6, 3.6], scale: 1.56 });
+    expectTransform(evaluateScene(scene, 7).objects[0], { position: object.exit!.to, rotation: object.exit!.rotation!, scale: object.exit!.scale! });
+    expect(evaluateScene(scene, 8).objects).toEqual(evaluateScene(scene, 7).objects);
+  });
+
+  it('applies easing within each segment, using the destination keyframe or motion fallback', () => {
+    // Halfway to the first knot: its linear easing overrides the overall acceleration.
+    expectTransform(evaluateScene(scene, 1.18).objects[0], { position: [-8, 1.5, 6], rotation: [0, 0, 6], scale: 0.4 });
+    // One quarter from the first to the second knot: smoothstep(0.25) = 0.15625.
+    expectTransform(evaluateScene(scene, 1.52).objects[0], { position: [-4.28125, 2.84375, 3.53125], rotation: [0, 0, 6.375], scale: 0.6 });
+    // Halfway to the third knot: omitted easing falls back to accelerate(0.5) = 0.125.
+    expectTransform(evaluateScene(scene, 2.3).objects[0], { position: [4.25, 1.5, 0.875], rotation: [0, 0.125, 2.625], scale: 0.675 });
+    // The final implicit endpoint also uses the motion easing.
+    expectTransform(evaluateScene(scene, 2.8).objects[0], { position: [-0.875, -1.75, 0], rotation: [0, 0.875, 0.125], scale: 1.175 });
+  });
+
+  it('uses the assembled scale and rotation as exit endpoints when they are omitted', () => {
+    const heldExit: SceneSpec = {
+      ...scene,
+      objects: [{ ...object, exit: { ...object.exit!, rotation: undefined, scale: undefined } }],
+    };
+    for (const time of [5, 5.36, 6.6, 7, 8]) {
+      const state = evaluateScene(heldExit, time).objects[0];
+      state.rotation.forEach((value, axis) => expect(value).toBeCloseTo(object.assembly!.rotation[axis], 12));
+      expect(state.scale).toBeCloseTo(object.assembly!.scale, 12);
+    }
+    // Explicit keyframe values can still depart from that origin during the motion.
+    expect(evaluateScene(heldExit, 6).objects[0].scale).toBeCloseTo(0.3, 12);
+  });
+
+  it('stays continuous at knots and endpoints and remains independent of seeking order', () => {
+    for (const time of [1, 1.36, 2, 2.6, 3, 5, 5.36, 6, 6.6, 7]) {
+      const before = evaluateScene(scene, time - 1e-7).objects[0];
+      const after = evaluateScene(scene, time + 1e-7).objects[0];
+      expect(Math.hypot(...after.position.map((value, axis) => value - before.position[axis]))).toBeLessThan(1e-4);
+      expect(Math.hypot(...after.rotation.map((value, axis) => value - before.rotation[axis]))).toBeLessThan(1e-4);
+      expect(Math.abs(after.scale - before.scale)).toBeLessThan(1e-4);
+    }
+    const restored: SceneSpec = JSON.parse(JSON.stringify(scene));
+    const expected = evaluateScene(scene, 6.27);
+    [8, 1.2, 6.8, 0, 4.1, 2.3].forEach(time => evaluateScene(scene, time));
+    expect(evaluateScene(restored, 6.27)).toEqual(expected);
+  });
+
+  it('preserves the legacy cubic path and easing when keyframes are absent or empty', () => {
+    const empty: SceneSpec = {
+      ...kineticScene,
+      objects: kineticScene.objects.map(legacy => ({
+        ...legacy,
+        entrance: { ...legacy.entrance!, keyframes: [] },
+        exit: { ...legacy.exit!, keyframes: [] },
+      })),
+    };
+    for (const time of [0, 0.23, 0.4, 0.8, 2.6, 3.3, 3.6, 3.9, 4]) {
+      expect(evaluateScene(empty, time)).toEqual(evaluateScene(kineticScene, time));
     }
   });
 });

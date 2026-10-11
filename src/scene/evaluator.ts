@@ -1,5 +1,5 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
-import type { CameraPose, Easing, EvaluatedObject, EvaluatedScene, ImpactMotion, Quat, SceneObject, SceneSpec, Vec3 } from './types';
+import type { CameraPose, Easing, EvaluatedObject, EvaluatedScene, ImpactMotion, MotionKeyframe, Quat, SceneObject, SceneSpec, Vec3 } from './types';
 
 function ease(t: number, easing: Easing): number {
   if (easing === 'linear') return t;
@@ -60,6 +60,45 @@ function offset(value: Vec3, amplitude: Vec3 | undefined, pulse: number): Vec3 {
 type SpatialTransform = Pick<SceneObject, 'id' | 'position' | 'rotation' | 'scale'>
   & Partial<Pick<SceneObject, 'assembly' | 'entrance' | 'exit' | 'impact'>>;
 
+type Transform = Pick<SceneObject, 'position' | 'rotation' | 'scale'>;
+
+function mixTransform(from: Transform, to: Transform, t: number): Transform {
+  return {
+    position: mix(from.position, to.position, t),
+    rotation: mix(from.rotation, to.rotation, t),
+    scale: from.scale + (to.scale - from.scale) * t,
+  };
+}
+
+function keyframedTransform(
+  from: Transform,
+  to: Transform,
+  motion: { start: number; end: number; easing: Easing; keyframes: readonly MotionKeyframe[] },
+  time: number,
+): Transform {
+  // Knot times belong to linear absolute time, independent of segment easing.
+  const local = motion.end <= motion.start ? (time >= motion.end ? 1 : 0)
+    : Math.max(0, Math.min(1, (time - motion.start) / (motion.end - motion.start)));
+  if (local <= 0) return from;
+  if (local >= 1) return to;
+  let previous = from;
+  let previousAt = 0;
+  for (const keyframe of motion.keyframes) {
+    const next: Transform = {
+      position: keyframe.position,
+      rotation: keyframe.rotation ?? mix(from.rotation, to.rotation, keyframe.at),
+      scale: keyframe.scale ?? from.scale + (to.scale - from.scale) * keyframe.at,
+    };
+    if (local <= keyframe.at) {
+      const segment = (local - previousAt) / (keyframe.at - previousAt);
+      return mixTransform(previous, next, ease(segment, keyframe.easing ?? motion.easing));
+    }
+    previous = next;
+    previousAt = keyframe.at;
+  }
+  return mixTransform(previous, to, ease((local - previousAt) / (1 - previousAt), motion.easing));
+}
+
 function objectTransform(object: SpatialTransform, time: number): EvaluatedObject {
   const assembly = object.assembly;
   const t = assembly ? progress(time, assembly) : 0;
@@ -68,16 +107,40 @@ function objectTransform(object: SpatialTransform, time: number): EvaluatedObjec
   let objectRotation = mix(object.rotation, destination.rotation, t);
   let objectScale = object.scale + (destination.scale - object.scale) * t;
   if (object.entrance && time < object.entrance.end) {
-    const arrival = progress(time, object.entrance);
-    objectPosition = trajectory(object.entrance.from, object.position, object.entrance.controls, arrival);
-    if (object.entrance.rotation) objectRotation = mix(object.entrance.rotation, object.rotation, arrival);
-    if (object.entrance.scale !== undefined) objectScale = object.entrance.scale + (object.scale - object.entrance.scale) * arrival;
+    const entrance = object.entrance;
+    if (entrance.keyframes?.length) {
+      const arrival = keyframedTransform({
+        position: entrance.from,
+        rotation: entrance.rotation ?? object.rotation,
+        scale: entrance.scale ?? object.scale,
+      }, object, { ...entrance, keyframes: entrance.keyframes }, time);
+      objectPosition = arrival.position;
+      objectRotation = arrival.rotation;
+      objectScale = arrival.scale;
+    } else {
+      const arrival = progress(time, entrance);
+      objectPosition = trajectory(entrance.from, object.position, entrance.controls, arrival);
+      if (entrance.rotation) objectRotation = mix(entrance.rotation, object.rotation, arrival);
+      if (entrance.scale !== undefined) objectScale = entrance.scale + (object.scale - entrance.scale) * arrival;
+    }
   }
   if (object.exit && time >= object.exit.start) {
-    const departure = progress(time, object.exit);
-    objectPosition = trajectory(destination.position, object.exit.to, object.exit.controls, departure);
-    if (object.exit.rotation) objectRotation = mix(destination.rotation, object.exit.rotation, departure);
-    if (object.exit.scale !== undefined) objectScale = destination.scale + (object.exit.scale - destination.scale) * departure;
+    const exit = object.exit;
+    if (exit.keyframes?.length) {
+      const departure = keyframedTransform(destination, {
+        position: exit.to,
+        rotation: exit.rotation ?? destination.rotation,
+        scale: exit.scale ?? destination.scale,
+      }, { ...exit, keyframes: exit.keyframes }, time);
+      objectPosition = departure.position;
+      objectRotation = departure.rotation;
+      objectScale = departure.scale;
+    } else {
+      const departure = progress(time, exit);
+      objectPosition = trajectory(destination.position, exit.to, exit.controls, departure);
+      if (exit.rotation) objectRotation = mix(destination.rotation, exit.rotation, departure);
+      if (exit.scale !== undefined) objectScale = destination.scale + (exit.scale - destination.scale) * departure;
+    }
   }
   const pulse = impactPulse(time, object.impact);
   return {

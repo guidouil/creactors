@@ -8,6 +8,19 @@ export type ColorRole = 'white' | 'pink' | 'coral' | 'cyan' | 'violet';
 export type MotionPrimitive = 'HOLD' | 'DEPTH' | 'ORBIT' | 'REVEAL' | 'CUT' | 'PORTAL' | 'TUNNEL';
 export type Easing = 'linear' | 'smooth' | 'cinematic' | 'accelerate';
 
+/** An intermediate absolute transform on a piecewise object trajectory. */
+export interface MotionKeyframe {
+  /** Strictly increasing normalized times between the implicit endpoints 0 and 1. */
+  at: number;
+  position: Vec3;
+  /** Defaults to the endpoint rotations interpolated at `at`. */
+  rotation?: Vec3;
+  /** Defaults to the endpoint scales interpolated at `at`. */
+  scale?: number;
+  /** Easing of the segment ending here; defaults to the motion's easing. */
+  easing?: Easing;
+}
+
 /** A brief damped recoil, evaluated in absolute time and settled at both ends. */
 export interface ImpactMotion {
   start: number;
@@ -47,6 +60,8 @@ export interface SceneObject {
     scale?: number;
     /** Absolute cubic Bezier control points for the arrival. */
     controls?: readonly [Vec3, Vec3];
+    /** Intermediate transforms; when non-empty, replace the cubic trajectory. */
+    keyframes?: readonly MotionKeyframe[];
     easing: Easing;
   };
   /** Physical rearrangement for the final poster. */
@@ -69,6 +84,8 @@ export interface SceneObject {
     scale?: number;
     /** Absolute cubic Bezier control points for the departure. */
     controls?: readonly [Vec3, Vec3];
+    /** Intermediate transforms; when non-empty, replace the cubic trajectory. */
+    keyframes?: readonly MotionKeyframe[];
     easing: Easing;
   };
   /** A short landing or emphasis recoil that finishes before readable holds. */

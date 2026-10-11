@@ -54,7 +54,7 @@ describe('hidden exportable films', () => {
       const saved = JSON.stringify(base);
       const spec = applySecretFilm(base);
       expect(spec.secretFilm).toBe(id);
-      expect(spec.generatorVersion).toBe(`${base.generatorVersion}+secrets-1`);
+      expect(spec.generatorVersion).toBe(`${base.generatorVersion}+secrets-2`);
       expect(applySecretFilm(base)).toEqual(spec);
       expect(applySecretFilm(spec)).toBe(spec);
       expect(JSON.stringify(base)).toBe(saved);
@@ -101,6 +101,52 @@ describe('hidden exportable films', () => {
       evaluateScene(spec, 0);
       expect(evaluateScene(spec, arbitrary)).toEqual(first);
     }
+  });
+
+  it.each(phrases)('keeps the visible %s finale inside the portrait frame before its rush', (_id, fr, en) => {
+    for (const text of [fr, en]) for (const seed of [1, 7, 11, 771]) {
+      const { spec: base, measured } = undecorated(text, seed);
+      const spec = applySecretFilm(base);
+      for (const fraction of [.18, .3, .5, .65, .7]) {
+        const exit = spec.objects[0]!.exit!;
+        const state = evaluateScene(spec, exit.start + (exit.end - exit.start) * fraction);
+        const camera = new PerspectiveCamera(spec.fov, spec.aspect, .05, 180);
+        camera.position.fromArray(state.camera.position);
+        camera.quaternion.fromArray(state.camera.quaternion);
+        camera.updateMatrixWorld();
+        state.objects.forEach((object, index) => {
+          const authored = spec.objects[index]!;
+          const rotation = new Quaternion().setFromEuler(new Euler(...object.rotation));
+          for (const x of [-1, 1]) for (const y of [-1, 1]) {
+            const point = new Vector3(x * measured[index]!.width * authored.fontSize * object.scale / 2,
+              y * measured[index]!.height * authored.fontSize * object.scale / 2, 0)
+              .applyQuaternion(rotation).add(new Vector3(...object.position)).project(camera);
+            expect(Math.abs(point.x), `${text}, seed ${seed}, at ${fraction}`).toBeLessThan(1);
+            expect(Math.abs(point.y), `${text}, seed ${seed}, at ${fraction}`).toBeLessThan(1);
+            expect(point.z).toBeGreaterThan(-1);
+            expect(point.z).toBeLessThan(1);
+          }
+        });
+      }
+    }
+  });
+
+  it('brings the boomerang words back to the settled poster before they leave', () => {
+    const spec = applySecretFilm(undecorated('Les mots reviennent toujours.', 7).spec);
+    const exit = spec.objects[0]!.exit!;
+    const poster = evaluateScene(spec, spec.posterTime!).objects;
+    const at = (fraction: number) => evaluateScene(spec, exit.start + (exit.end - exit.start) * fraction).objects;
+    const outgoing = at(.24);
+    const returning = at(.5);
+    for (let index = 0; index < poster.length; index++) {
+      const centre = poster[index]!.position[0];
+      expect((outgoing[index]!.position[0] - centre) * (returning[index]!.position[0] - centre)).toBeLessThan(0);
+    }
+    at(.74).forEach((object, index) => {
+      object.position.forEach((value, axis) => expect(value).toBeCloseTo(poster[index]!.position[axis]!, 10));
+      object.rotation.forEach((value, axis) => expect(value).toBeCloseTo(poster[index]!.rotation[axis]!, 10));
+      expect(object.scale).toBeCloseTo(poster[index]!.scale, 10);
+    });
   });
 
   it('settles camera orientations at track boundaries, including generated portals', () => {

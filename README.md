@@ -420,6 +420,10 @@ The six complete phrases below trigger exportable secret directions on CREATE.
 Case, accents, apostrophe variants, surrounding whitespace and final punctuation
 do not affect discovery. Ordinary quotations containing these words keep their
 usual direction. REMIX retains the secret while choosing a fresh choreography.
+Each secret uses staged, frame-sized movements: a weightless rise, a visible
+boomerang return, a centred spin, an axial dive, a contraction and radial burst,
+or a seven-step orbit. The gesture stays visible before its final departure;
+reading shots and the settled poster retain their normal framing.
 
 | Secret | French phrase | English phrase |
 | --- | --- | --- |
