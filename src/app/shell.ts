@@ -6,7 +6,8 @@ import type { ImageAsset } from '../image/types';
 import type { GiphyResult } from '../image/giphy';
 import { createGiphyPicker } from './giphy-picker';
 import { createFontPicker } from './font-picker';
-import { DEFAULT_FONT_ID, getDisplayFont } from '../typography/fonts';
+import { DEFAULT_FONT_ID, getDisplayFont, loadDisplayFont } from '../typography/fonts';
+import { graphemes } from '../text/graphemes';
 import { builtinAudioTracks, getBuiltinAudio, isBuiltinAudioId } from '../audio/choices';
 import { mountEasterEggs } from './easter-eggs';
 import { findSecretFilm, type SecretFilmId } from '../direction/secrets';
@@ -272,6 +273,8 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   const canvas = find<HTMLCanvasElement>('canvas');
   const stage = find<HTMLElement>('.stage');
   const quote = find<HTMLTextAreaElement>('.quote-input');
+  const quoteMeasure = document.createElement('canvas').getContext('2d');
+  let quoteSizeFrame = 0;
   const create = find<HTMLButtonElement>('.create-button');
   const example = find<HTMLButtonElement>('.example-button');
   const playback = find<HTMLElement>('.playback');
@@ -406,7 +409,46 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     buttonLabel(find<HTMLButtonElement>('.font-editor-button'), strings(locale).fontCurrent(font.name));
     buttonLabel(find<HTMLButtonElement>('.font-film-button'), strings(locale).fontCurrent(getDisplayFont(filmFontId).name));
     fontPicker.setFont(id);
+    scheduleQuoteFontSize();
+    // The browser must use the loaded face rather than a fallback's advances.
+    void loadDisplayFont(id).then(() => { if (fontId === id) scheduleQuoteFontSize(); }).catch(() => undefined);
   }
+
+  function fitQuoteFontSize() {
+    if (!quoteMeasure || quote.clientWidth === 0) return;
+    // Recover the responsive CSS size every time, so shorter text, a narrower
+    // font or a larger viewport can grow back after an earlier reduction.
+    quote.style.removeProperty('font-size');
+    const style = getComputedStyle(quote);
+    const baseSize = parseFloat(style.fontSize);
+    const width = quote.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 6;
+    if (!(baseSize > 0) || !(width > 0)) return;
+    const { capHeight, unitsPerEm } = getDisplayFont(fontId).metadata;
+    const capRatio = capHeight / unitsPerEm;
+    const normalizedSize = baseSize * (Number.isFinite(capRatio) && capRatio > 0 ? Math.min(1, 0.7 / capRatio) : 1);
+    const spacing = (parseFloat(style.letterSpacing) || 0) / baseSize;
+    quoteMeasure.font = `${style.fontStyle} ${style.fontWeight} 100px ${style.fontFamily}`;
+    let widestWord = 0;
+    for (const word of (quote.value || quote.placeholder).trim().split(/\s+/u)) {
+      const normalized = word.normalize('NFC');
+      const metrics = quoteMeasure.measureText(normalized);
+      const inkWidth = metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight;
+      const measured = Math.max(metrics.width, Number.isFinite(inkWidth) ? inkWidth : 0) / 100;
+      widestWord = Math.max(widestWord, measured + spacing * Math.max(0, graphemes(normalized).length - 1));
+    }
+    // Keep long drafts scrollable vertically; fit words, not the whole quote.
+    const size = Math.max(16, Math.min(normalizedSize, widestWord > 0 ? width / widestWord : normalizedSize));
+    quote.style.fontSize = `${Math.floor(size * 100) / 100}px`;
+  }
+
+  function scheduleQuoteFontSize() {
+    if (quoteSizeFrame) return;
+    quoteSizeFrame = requestAnimationFrame(() => { quoteSizeFrame = 0; fitQuoteFontSize(); });
+  }
+  const quoteSizeObserver = new ResizeObserver(scheduleQuoteFontSize);
+  quoteSizeObserver.observe(quote);
+  window.addEventListener('resize', scheduleQuoteFontSize);
+  document.fonts.addEventListener('loadingdone', scheduleQuoteFontSize);
 
   function updateMessageSpace() {
     const height = message.hidden ? 0 : message.getBoundingClientRect().height + parseFloat(getComputedStyle(message).marginTop);
@@ -478,6 +520,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   quote.addEventListener('pointercancel', () => { selectQuoteOnClick = false; });
   quote.addEventListener('input', () => {
     quote.lang = 'und';
+    scheduleQuoteFontSize();
     if (!editing) { editing = true; updateState(); }
     editCallback();
   });
@@ -919,6 +962,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     updateAudio();
     updateAudioCredits();
     updateExport();
+    scheduleQuoteFontSize();
   }
 
   function updateState() {

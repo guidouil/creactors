@@ -6,7 +6,7 @@ import { emojiCoverage } from '../typography/emoji';
 import { DEFAULT_FONT_ID, getDisplayFont } from '../typography/fonts';
 import { applySecretFilm } from './secrets';
 
-const GENERATOR_VERSION = 'spatial-grammar-2.2.1';
+const GENERATOR_VERSION = 'spatial-grammar-2.2.2';
 const FPS = 30;
 const FOV = 38;
 const ASPECT = 9 / 16;
@@ -109,6 +109,12 @@ function distanceToFit(group: MeasuredGroup, fontSize: number, scale = 1): numbe
   );
 }
 
+function opticalFontSize(group: MeasuredGroup): number {
+  // Match the default font's cap height, then fit unusually wide/tall groups.
+  // The camera still checks both dimensions, including rotation and margins.
+  return 1.65 * Math.min(1, 0.7 / Math.max(0.7, group.capHeight), 6 / group.width, 4 / group.height);
+}
+
 function readingPose(object: SceneObject, measured: MeasuredGroup, layoutRandom: () => number): CameraPose {
   const angle = Math.abs(object.rotation[2]);
   const framed = {
@@ -144,7 +150,7 @@ function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObjec
   const scale = measured.length <= 5 ? 0.72 : 0.94;
   // Portal eligibility can enlarge a hero in its reading shot. Restore the
   // common optical size when the permanent objects assemble into the poster.
-  const scales = objects.map(object => scale * 1.65 / object.fontSize);
+  const scales = objects.map((object, index) => scale * opticalFontSize(measured[index]!) / object.fontSize);
   const heights = displayed.map(index => measured[index]!.inkHeight * objects[index]!.fontSize * scales[index]!);
   const gap = 0.58;
   const totalHeight = heights.reduce((sum, value) => sum + value, 0) + gap * (heights.length - 1);
@@ -294,14 +300,13 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   const colorRandom = stream(seed, `color-${attempt}`);
   const style = chooseStyle(seed, attempt);
   const direction = style.handedness;
-  const fontSize = 1.65;
   const positions = spatialLayout(measured, style, layoutRandom);
   const colors = colorRoles(measured.length, colorRandom);
   const firstSemantic = measured.reduce((best, current, index) => current.scores.narrative + current.scores.linguistic > measured[best]!.scores.narrative + measured[best]!.scores.linguistic ? index : best, 0);
   const objects: SceneObject[] = measured.map((group, index) => {
     const emphasis = index === measured.length - 1 || index === firstSemantic;
     return {
-      id: group.id, text: group.group.text, displayText: group.displayText, fontSize,
+      id: group.id, text: group.group.text, displayText: group.displayText, fontSize: opticalFontSize(group),
       position: positions[index]!, rotation: [0, (layoutRandom() - 0.5) * 0.16, (layoutRandom() - 0.5) * 0.24], scale: 1,
       colorRole: colors[index]!,
       extruded: emphasis && !group.group.tokens.some(token => token.emoji), extrusionDepth: emphasis ? 0.20 : 0,
@@ -314,9 +319,11 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   if (measured.length > 1 && advancedChoice < 0.34) {
     const candidates = measured.slice(0, -1).flatMap((group, index) => {
       const aperture = group.portal;
+      // A word reduced to fit must not be enlarged again for a portal shot.
+      if (group.width > 6 || group.height > 4) return [];
       if (!aperture || group.group.tokens.some(token => token.emoji) || aperture.radius <= 0.012) return [];
       const necessarySize = (NEAR_FRUSTUM_CORNER + 0.025) / (aperture.radius - 0.008) * 1.12;
-      return necessarySize <= 3 ? [{ index, aperture, size: Math.max(fontSize, necessarySize) }] : [];
+      return necessarySize <= 3 ? [{ index, aperture, size: Math.max(objects[index]!.fontSize, necessarySize) }] : [];
     });
     const choice = candidates[Math.floor(motionRandom() * candidates.length)];
     if (choice) {

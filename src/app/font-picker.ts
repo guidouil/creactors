@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_ID, getDisplayFont, GlyphCoverageError, listDisplayFonts, loadDisplayFont, type DisplayFont } from '../typography/fonts';
+import { DEFAULT_FONT_ID, getDisplayFont, GlyphCoverageError, listDisplayFonts, loadDisplayFont, type DisplayFont, type FontCharacter } from '../typography/fonts';
 import { FontImportError, importDisplayFont, localFontsAvailable, queryLocalFonts, type LocalFont } from '../typography/font-import';
 import { strings, type Locale } from './i18n';
 import { icon } from './icons';
@@ -83,7 +83,13 @@ export function createFontPicker(host: HTMLElement, options: FontPickerOptions) 
     return options.getSample().trim().replace(/\s+/gu, ' ').slice(0, 72) || copy().fontSample;
   }
 
-  function option(name: string, family: string, weight: string, style: string, selected: boolean, onSelect: () => void) {
+  function characterLabel(character: FontCharacter) {
+    const text = copy();
+    return { block: text.fontStyleBlock, stencil: text.fontStyleStencil, slab: text.fontStyleSlab,
+      pixel: text.fontStylePixel, condensed: text.fontStyleCondensed, geometric: text.fontStyleGeometric }[character];
+  }
+
+  function option(name: string, family: string, weight: string, style: string, selected: boolean, onSelect: () => void, character?: FontCharacter) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'font-option';
@@ -100,7 +106,17 @@ export function createFontPicker(host: HTMLElement, options: FontPickerOptions) 
     sample.style.fontFamily = `${JSON.stringify(family)}, sans-serif`;
     sample.style.fontWeight = weight;
     sample.style.fontStyle = style;
-    button.append(heading, sample);
+    const title = document.createElement('span');
+    title.className = 'font-option-heading';
+    title.append(heading);
+    if (character) {
+      const badge = document.createElement('span');
+      badge.className = 'font-option-character';
+      badge.textContent = characterLabel(character);
+      title.append(badge);
+      button.dataset.fontCharacter = character;
+    }
+    button.append(title, sample);
     button.addEventListener('click', onSelect);
     return button;
   }
@@ -108,11 +124,11 @@ export function createFontPicker(host: HTMLElement, options: FontPickerOptions) 
   function renderChoices() {
     const query = search.value.trim().toLocaleLowerCase(options.getLocale());
     const matches = (name: string) => name.toLocaleLowerCase(options.getLocale()).includes(query);
-    const fonts = listDisplayFonts().filter(font => matches(font.name));
+    const fonts = listDisplayFonts().filter(font => matches(font.name) || (font.character && matches(characterLabel(font.character))));
     choices.replaceChildren(...fonts.map(font => {
       const button = option(font.name, font.family, String(font.weight), font.style, font.id === fontId, () => {
         void select(() => loadDisplayFont(font.id).then(() => font));
-      });
+      }, font.character);
       button.dataset.fontId = font.id;
       return button;
     }));

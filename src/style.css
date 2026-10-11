@@ -127,9 +127,17 @@ button, a, textarea, input { outline-offset: 6px; }
 .font-option { min-width: 0; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--hover); color: var(--white); text-align: left; }
 .font-option:hover { border-color: var(--pink); }
 .font-option[aria-pressed="true"] { border-color: var(--pink); background: var(--accent-outline); }
+.font-option-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px 8px; }
+.font-option-character { color: var(--pink); font-size: 9px; line-height: 1.4; }
 .font-option-name { display: block; color: var(--secondary); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
 .font-option[aria-pressed="true"] .font-option-name { color: var(--pink); }
-.font-option-sample { display: block; margin-top: 8px; font-size: 27px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.font-option-sample { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; margin-top: 10px; min-height: 2.4em; font-size: 25px; line-height: 1.2; overflow: hidden; overflow-wrap: anywhere; }
+.font-option[data-font-character="pixel"] .font-option-sample { font-size: 17px; line-height: 1.5; min-height: 3em; }
+@media (max-width: 420px) {
+  .font-options, .font-device-options { grid-template-columns: 1fr; }
+  .font-option-sample { min-height: 0; font-size: 23px; }
+  .font-option[data-font-character="pixel"] .font-option-sample { min-height: 0; font-size: 17px; }
+}
 .font-source-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .font-source-actions button { flex: 1 1 160px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--hover); color: var(--pink); font-size: 11px; }
 .font-source-actions button:hover { border-color: var(--pink); }

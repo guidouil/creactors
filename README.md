@@ -270,8 +270,13 @@ and iPad devices. Native Safari soundtrack export remains to be confirmed.
 ## Typography and local direction
 
 The Aa button in the editor and beside the playback controls opens a searchable
-font picker with previews of the current text. Barlow Condensed Black, Anton,
-Bebas Neue and Montserrat Bold are bundled for offline use. Selecting a font in
+font picker with previews of the current text and labels for each style. Barlow
+Condensed Black, Bungee, Black Ops One, Alfa Slab One, Pixel Arcade, Anton,
+Bebas Neue and Montserrat Bold are bundled for offline use. Pixel Arcade uses
+retro pixel outlines with square, unbeveled 3D edges. The editor adjusts size
+to the font's cap height, its widest word and the available width. Films also
+adjust size from measured glyphs and keep wide words whole, including the final
+composition. Selecting a font in
 the editor changes the draft; CREATE applies it to the next film. Selecting from
 the film controls refits the current text with the same seed and colors. REMIX,
 photos, playback and video export retain the generated film's font.

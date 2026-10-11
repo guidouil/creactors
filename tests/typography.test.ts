@@ -20,9 +20,15 @@ describe('bundled typography coverage and geometry', () => {
       expect(measured.every(group => group.fontId === font.id && Number.isFinite(group.width))).toBe(true);
       widths.push(measureLine('Make words move.', font.id).width);
       const portal = findPortal('O', 1, font.id);
-      expect(portal?.radius).toBeGreaterThan(0.01);
       const outline = outlineLayout('O', 1, font.id);
-      expect(outline.shapes.some(shape => shape.holes.length)).toBe(true);
+      // A stencil's open counter cannot be used as a camera portal.
+      if (font.character === 'stencil') {
+        expect(portal).toBeNull();
+        expect(outline.shapes.some(shape => shape.holes.length)).toBe(false);
+      } else {
+        expect(portal?.radius).toBeGreaterThan(0.01);
+        expect(outline.shapes.some(shape => shape.holes.length)).toBe(true);
+      }
       const seed = stableSeed(FUTURE_QUOTE);
       const scene = MotionDirector.direct(analysis, measured, 'califormandy-sunset', seed);
       expect(scene.fontVersion).toBe(getDisplayFont(font.id).version);
@@ -33,7 +39,7 @@ describe('bundled typography coverage and geometry', () => {
       }
       expect(MotionDirector.direct(analysis, measured, 'califormandy-sunset', seed)).toEqual(scene);
     }
-    expect(new Set(widths).size).toBe(4);
+    expect(new Set(widths).size).toBe(listDisplayFonts().length);
     // Alternating selections must not reuse another font's measurement cache.
     expect(measureLine('Make words move.').width).toBe(widths[0]);
   });
@@ -42,6 +48,20 @@ describe('bundled typography coverage and geometry', () => {
     expect(() => validateGlyphs(text)).not.toThrow();
     expect(text).toContain('e\u0301');
     expect(() => validateGlyphs('你好')).toThrow(GlyphCoverageError);
+  });
+  it('keeps wide words whole and reduces the pixel font size to fit', () => {
+    const text = 'L’imagination transforme les possibilités.';
+    const analysis = TextDirector.analyze(text, 'fr');
+    const measured = measureGroups(analysis, 'press-start-2p');
+    const words = measured.flatMap(group => group.displayText.split(/\s+/u));
+    expect(words).toEqual(text.split(/\s+/u));
+    const scene = MotionDirector.direct(analysis, measured, 'califormandy-sunset', stableSeed(text));
+    expect(scene.objects.every(object => object.fontSize < 1.65)).toBe(true);
+    for (const [index, object] of scene.objects.entries()) {
+      // Portal heroes can be enlarged deliberately; ordinary words retain the fit.
+      if (object.fontSize <= 1.65) expect(measured[index]!.width * object.fontSize).toBeLessThanOrEqual(6 * 1.65 + 0.001);
+    }
+    expect(scene.sourceText).toBe(text);
   });
   it('keeps supported complete emoji sequences whole and rejects uncovered ones', () => {
     const sequences = ['👨‍👩‍👧‍👦', '👍🏽', '🇫🇷', '1️⃣'];

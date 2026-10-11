@@ -88,10 +88,16 @@ try {
   await offline.locator('.create-button').click();
   await offline.waitForFunction(() => ['playing', 'paused'].includes(document.querySelector('.studio')?.dataset.state), undefined, { timeout: 60_000 });
   if ((await offline.locator('.studio').getAttribute('data-state')) === 'playing') await offline.locator('.toggle-button').click();
-  await offline.locator('.font-film-button').click();
-  await offline.locator('[data-font-id="anton"]').click();
-  await offline.locator('#font-picker').waitFor({ state: 'hidden' });
-  if (!(await offline.locator('.font-film-button').getAttribute('aria-label')).includes('Anton')) throw new Error('The offline film did not change its font.');
+  for (const [fontId, name] of [
+    ['bungee', 'Bungee'], ['black-ops-one', 'Black Ops One'], ['alfa-slab-one', 'Alfa Slab One'],
+    ['press-start-2p', 'Pixel Arcade'], ['barlow-condensed-black', 'Barlow Condensed Black'],
+    ['bebas-neue', 'Bebas Neue'], ['montserrat-bold', 'Montserrat Bold'], ['anton', 'Anton'],
+  ]) {
+    await offline.locator('.font-film-button').click();
+    await offline.locator(`[data-font-id="${fontId}"]`).click();
+    await offline.locator('#font-picker').waitFor({ state: 'hidden' });
+    if (!(await offline.locator('.font-film-button').getAttribute('aria-label')).includes(name)) throw new Error(`The offline film did not load ${name}.`);
+  }
   for (const colorScheme of ['dark', 'light']) {
     await offline.emulateMedia({ colorScheme });
     await offline.waitForFunction(scheme => document.documentElement.dataset.colorScheme === scheme, colorScheme);
@@ -159,7 +165,7 @@ try {
   if (errors.length) throw new Error(`Offline runtime errors: ${errors.join('; ')}`);
   if (external.length) throw new Error(`External runtime requests: ${external.join('; ')}`);
   const size = (await readFile(resolve(directory, 'index.html'))).byteLength;
-  console.log(`Offline reopening passed at ${base}: animated example welcome, help dialog, portrait playback, six recorded soundtracks and audio credits, local photo/GIF import, safe waiting/activation of updates, ${installed.manifest.icons.length} maskable icons, ${(size / 1024 / 1024).toFixed(2)} MiB self-contained page, no external requests or runtime errors.`);
+  console.log(`Offline reopening passed at ${base}: animated example welcome, help dialog, eight display fonts, portrait playback, six recorded soundtracks and audio credits, local photo/GIF import, safe waiting/activation of updates, ${installed.manifest.icons.length} maskable icons, ${(size / 1024 / 1024).toFixed(2)} MiB self-contained page, no external requests or runtime errors.`);
   await context.close();
 } finally {
   if (browser) await browser.close();

@@ -338,7 +338,8 @@ describe('measured typography and procedural direction', () => {
     for (const text of ['Oui.', 'IMAGINATION'.repeat(5), 'Créons 👨‍👩‍👧‍👦 maintenant.']) {
       const { spec, measured } = direct(text);
       expect(spec.objects.map(object => object.text).join('')).toBe(text);
-      expect(measured.every(group => group.width <= 6.05)).toBe(true);
+      expect(measured.every((group, index) => group.width * spec.objects[index]!.fontSize <= 6.05 * 1.65)).toBe(true);
+      expect(measured.flatMap(group => group.displayText.split(/\s+/u))).toEqual(text.split(/\s+/u));
       if (text.includes('👨')) expect(spec.objects.find(object => object.text.includes('👨'))!.extruded).toBe(false);
     }
   });

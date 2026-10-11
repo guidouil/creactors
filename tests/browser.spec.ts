@@ -31,14 +31,18 @@ test('selects bundled fonts for the draft, 3D film and remixes with unclipped re
   const diagnostics = await openStudio(page);
   await page.locator('.font-editor-button').click();
   await expect(page.locator('#font-picker')).toBeVisible();
-  await expect(page.locator('.font-options .font-option')).toHaveCount(4);
+  await expect(page.locator('.font-options .font-option')).toHaveCount(8);
+  await page.locator('#font-search').fill('pixel');
+  await expect(page.locator('.font-options .font-option')).toHaveCount(1);
+  await expect(page.locator('[data-font-id="press-start-2p"] .font-option-character')).toHaveText('8-bit');
+  await page.locator('#font-search').fill('');
   await page.locator('[data-font-id="anton"]').click();
   await expect(page.locator('#font-picker')).not.toBeVisible();
   await expect(page.locator('.quote-input')).toHaveCSS('font-family', /Anton/);
   await createAndPause(page);
   const original = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
   expect(original.fontId).toBe('anton');
-  for (const fontId of ['bebas-neue', 'montserrat-bold', 'barlow-condensed-black']) {
+  for (const fontId of ['bungee', 'black-ops-one', 'alfa-slab-one', 'press-start-2p', 'bebas-neue', 'montserrat-bold', 'barlow-condensed-black']) {
     await page.locator('.font-film-button').click();
     await page.locator(`[data-font-id="${fontId}"]`).click();
     await expect(page.locator('#font-picker')).not.toBeVisible();
@@ -54,18 +58,71 @@ test('selects bundled fonts for the draft, 3D film and remixes with unclipped re
     expect(result.spec.themeId).toBe(original.themeId);
     expect(result.spec.seed).toBe(original.seed);
     for (const box of result.bounds) {
-      expect(box.min[0]).toBeGreaterThan(-0.9);
-      expect(box.max[0]).toBeLessThan(0.9);
-      expect(box.min[1]).toBeGreaterThan(-0.9);
-      expect(box.max[1]).toBeLessThan(0.9);
+      expect(box.min[0], `${fontId} ${box.id}`).toBeGreaterThan(-0.9);
+      expect(box.max[0], `${fontId} ${box.id}`).toBeLessThan(0.9);
+      expect(box.min[1], `${fontId} ${box.id}`).toBeGreaterThan(-0.9);
+      expect(box.max[1], `${fontId} ${box.id}`).toBeLessThan(0.9);
     }
   }
   await page.locator('.font-film-button').click();
-  await page.locator('[data-font-id="montserrat-bold"]').click();
+  await page.locator('[data-font-id="press-start-2p"]').click();
   await expect(page.locator('#font-picker')).not.toBeVisible();
   await page.locator('.remix-button').click();
   await expect(page.locator('.studio')).toHaveAttribute('data-state', 'playing');
-  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe('montserrat-bold');
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe('press-start-2p');
+  diagnostics.verify();
+});
+
+test('automatically sizes display fonts on mobile without breaking wide French words', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const diagnostics = await openStudio(page);
+  const text = 'L’imagination transforme les possibilités.';
+  await page.locator('.quote-input').fill(text);
+  const sizes: number[] = [];
+  for (const fontId of ['bungee', 'black-ops-one', 'alfa-slab-one', 'press-start-2p']) {
+    await page.locator('.font-editor-button').click();
+    await page.locator(`[data-font-id="${fontId}"]`).click();
+    await expect(page.locator('#font-picker')).not.toBeVisible();
+    const inputFit = await page.locator('.quote-input').evaluate(input => {
+      const style = getComputedStyle(input);
+      const context = document.createElement('canvas').getContext('2d')!;
+      context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      context.letterSpacing = style.letterSpacing;
+      return { size: parseFloat(style.fontSize), width: input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        longest: Math.max(...(input as HTMLTextAreaElement).value.split(/\s+/u).map(word => context.measureText(word).width)) };
+    });
+    expect(inputFit.longest, fontId).toBeLessThanOrEqual(inputFit.width + 1);
+    sizes.push(inputFit.size);
+    await createAndPause(page);
+    const result = await page.evaluate(() => {
+      const dev = (window as unknown as DebugWindow).__CREACTORS_DEV__;
+      return { words: dev.spec.objects.flatMap(object => (object.displayText ?? object.text).split(/\s+/u)),
+        bounds: dev.spec.objects.map(object => {
+          dev.seek((object.readingInterval[0] + object.readingInterval[1]) / 2);
+          return dev.bounds().find(box => box.id === object.id)!;
+        }) };
+    });
+    expect(result.words).toEqual(text.split(/\s+/u));
+    for (const box of result.bounds) {
+      expect(box.min[0], `${fontId} ${box.id}`).toBeGreaterThan(-0.9);
+      expect(box.max[0], `${fontId} ${box.id}`).toBeLessThan(0.9);
+      expect(box.min[1], `${fontId} ${box.id}`).toBeGreaterThan(-0.9);
+      expect(box.max[1], `${fontId} ${box.id}`).toBeLessThan(0.9);
+    }
+    await page.locator('.edit-button').click();
+  }
+  expect(new Set(sizes.map(size => Math.round(size * 100))).size).toBeGreaterThan(1);
+  await page.locator('.quote-input').fill('EXTRAORDINAIREMENT');
+  const fontSize = () => page.locator('.quote-input').evaluate(input => parseFloat(getComputedStyle(input).fontSize));
+  await expect.poll(fontSize).toBeLessThan(sizes.at(-1)!);
+  const reduced = await fontSize();
+  await page.locator('.quote-input').fill('ÉTÉ');
+  await expect.poll(fontSize).toBeGreaterThan(reduced);
+  const mobileSize = await fontSize();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect.poll(fontSize).toBeGreaterThan(mobileSize);
+  await page.locator('.quote-input').fill(text.repeat(20));
+  await expect.poll(() => page.locator('.quote-input').evaluate(input => input.scrollHeight > input.clientHeight)).toBe(true);
   diagnostics.verify();
 });
 
@@ -156,12 +213,12 @@ test('loads a chosen OS font locally without requesting remote assets', async ({
   diagnostics.verify();
 });
 
-test('exports the selected font with video frames matching the 3D preview', async ({ page }) => {
+for (const fontId of ['montserrat-bold', 'press-start-2p']) test(`exports the selected ${fontId} font with video frames matching the 3D preview`, async ({ page }) => {
   test.setTimeout(90000);
   const diagnostics = await openStudio(page);
   await page.locator('.quote-input').fill('Make  words  move.');
   await page.locator('.font-editor-button').click();
-  await page.locator('[data-font-id="montserrat-bold"]').click();
+  await page.locator(`[data-font-id="${fontId}"]`).click();
   await expect(page.locator('#font-picker')).not.toBeVisible();
   await createAndPause(page);
   const downloaded = page.waitForEvent('download');
@@ -200,7 +257,7 @@ test('exports the selected font with video frames matching the 3D preview', asyn
   }, { encoded: bytes.toString('base64'), mp4: download.suggestedFilename().endsWith('.mp4') });
   expect(differences.length).toBeGreaterThan(1);
   for (const difference of differences) expect(difference).toBeLessThan(3);
-  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe('montserrat-bold');
+  expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe(fontId);
   await expect(page.locator('.studio')).toHaveAttribute('data-state', 'paused');
   diagnostics.verify();
 });

@@ -16,6 +16,42 @@ import opentype from 'opentype.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const specifications = [
   {
+    id: 'bungee-regular', file: 'CREACTORSBlock-Regular.ttf',
+    familyName: 'CREACTORS Block', displayName: 'CREACTORS Block', weight: '400',
+    url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/bungee/Bungee-Regular.ttf',
+    sha256: 'e183e9f34abd21ef73f152003e96814d34063aa20bce26299d1c355dfcb32d3e',
+    derivedFrom: {
+      file: 'Bungee-Regular.ttf',
+      sha256: 'c4f5361ce120af3e6b9156d0bf379fa19cda2ea0cd18ac01fd99596c6bf66e3f',
+      transform: 'Retained horizontal GPOS kern/mark/mkmk; removed ss11/ss12/vkrn positioning; renamed family, full, unique and PostScript names to CREACTORS Block.',
+      tool: 'FontTools 4.60.2 scripts/prepare-block-font.py (recalcTimestamp=False)',
+    },
+  },
+  {
+    id: 'black-ops-one-regular', file: 'BlackOpsOne-Regular.ttf',
+    familyName: 'Black Ops One', displayName: 'Black Ops One Regular', weight: '400',
+    url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/blackopsone/BlackOpsOne-Regular.ttf',
+    sha256: '282a825b5f294377387e3969f765408157dbea8da0f5d0aae68c6bc704b145b3',
+  },
+  {
+    id: 'alfa-slab-one-regular', file: 'AlfaSlabOne-Regular.ttf',
+    familyName: 'CREACTORS Slab Outlines', displayName: 'Alfa Slab One Regular', weight: '400',
+    url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/alfaslabone/AlfaSlabOne-Regular.ttf',
+    sha256: '28664afa698a3393bd5a29eec750230a0645c5301d62200e5f2d3a027fb2299d',
+  },
+  {
+    id: 'press-start-2p-regular', file: 'CREACTORSArcade-Regular.ttf',
+    familyName: 'CREACTORS Arcade', displayName: 'CREACTORS Arcade', weight: '400',
+    url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf',
+    sha256: '672d7b0e816eb41638b7195921237d523694814b406eea29745238ba937bfbea',
+    derivedFrom: {
+      file: 'PressStart2P-Regular.ttf',
+      sha256: '034c77f1f05ec89421e4a63f0e3a4ca1ecf852cc6d2bf611f126f275728e017d',
+      transform: 'Removed GSUB; renamed family, full, unique and PostScript names to CREACTORS Arcade.',
+      tool: 'FontTools 4.60.2 scripts/prepare-pixel-font.py (recalcTimestamp=False)',
+    },
+  },
+  {
     id: 'barlow-condensed-black', file: 'BarlowCondensed-Black.ttf',
     familyName: 'Barlow Condensed', displayName: 'Barlow Condensed Black', weight: '900',
     url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/barlowcondensed/BarlowCondensed-Black.ttf',
@@ -47,7 +83,7 @@ const specifications = [
   },
 ];
 
-// Verify the original variable source as well as the runtime static instance.
+// Verify original sources as well as their derived runtime fonts.
 for (const specification of specifications) {
   if (specification.derivedFrom) {
     const source = specification.derivedFrom;

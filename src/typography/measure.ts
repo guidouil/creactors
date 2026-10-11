@@ -102,12 +102,8 @@ function wrap(text: string, fontId: string, maxWidth = 6): string[] {
   for (const word of words) {
     if (measure(word).width > maxWidth) {
       if (current) { lines.push(current); current = ''; }
-      let partial = '';
-      for (const cluster of graphemes(word)) {
-        if (partial && measure(partial + cluster).width > maxWidth) { lines.push(partial); partial = ''; }
-        partial += cluster;
-      }
-      current = partial;
+      // Keep wide words whole; the director reduces their size to fit.
+      lines.push(word);
       continue;
     }
     const candidate = current ? `${current} ${word}` : word;

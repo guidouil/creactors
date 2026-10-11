@@ -20,10 +20,12 @@ export interface PreparedTypography {
 
 function extruded(spec: SceneObject, theme: Theme, fontId: string): PreparedTypography {
   const { shapes } = outlineLayout(spec.displayText ?? spec.text, spec.fontSize, fontId);
+  const square = getDisplayFont(fontId).extrusion === 'square';
   const geometry = new ExtrudeGeometry(shapes, {
     depth: spec.extrusionDepth,
-    curveSegments: 14,
-    bevelEnabled: true,
+    // Pixel fonts keep their stepped contours and cuboid sidewalls intact.
+    curveSegments: square ? 1 : 14,
+    bevelEnabled: !square,
     bevelSize: 0.008 * spec.fontSize,
     bevelThickness: 0.008 * spec.fontSize,
     bevelSegments: 2,
