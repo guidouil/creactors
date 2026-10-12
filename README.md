@@ -75,7 +75,10 @@ replay and export retain the resolved seed and choreography. The authored film
 remains available through its fixed seed in development inspection.
 
 Preview loops continuously. After each phrase has been read, the final
-composition settles briefly for 0.4 seconds, then the
+composition settles briefly for 0.6 seconds. When its measured text height
+exceeds the visible frame, the camera scans the complete composition from top
+to bottom at a readable size, with a brief hold at the bottom. The scan adapts
+to the font and line wrapping and fits within the 60-second film limit. Then the
 physical text objects accelerate through the camera and leave an empty frame
 matching the opening. Pause, replay, REMIX, download and theme controls sit below
 the portrait stage. Edit reopens the input on mobile without clearing it.

@@ -4,7 +4,7 @@ import { MotionDirector, sceneSignature } from '../src/direction/director';
 import { applySecretFilm, findSecretFilm, type SecretFilmId } from '../src/direction/secrets';
 import { evaluateScene } from '../src/scene/evaluator';
 import { withFinalImages } from '../src/scene/final-image';
-import type { SceneSpec } from '../src/scene/types';
+import type { SceneSpec, Vec3 } from '../src/scene/types';
 import { TextDirector } from '../src/text/director';
 import { measureGroups } from '../src/typography/measure';
 
@@ -147,6 +147,62 @@ describe('hidden exportable films', () => {
       object.rotation.forEach((value, axis) => expect(value).toBeCloseTo(poster[index]!.rotation[axis]!, 10));
       expect(object.scale).toBeCloseTo(poster[index]!.scale, 10);
     });
+  });
+
+  it.each([
+    'Il y a un monde derrière les lettres.', 'Une petite phrase peut devenir une supernova.', 'Words always come back.',
+  ])('finishes the complete final scan before its secret gesture and photographs: %s', text => {
+    for (const seed of [1, 11, 77]) {
+      const { spec: base } = undecorated(text, seed);
+      const secret = applySecretFilm(base);
+      const scroll = secret.cameraTracks.find(track => track.id === 'poster-scroll')!;
+      const end = secret.cameraTracks.find(track => track.id === 'poster-end')!;
+      expect(scroll).toBeDefined();
+      expect(end).toBeDefined();
+      for (const object of secret.objects) expect(object.exit!.start).toBe(end.end);
+      for (let frame = Math.ceil(scroll.start * secret.fps); frame / secret.fps < end.end; frame++) {
+        const time = frame / secret.fps;
+        expect(evaluateScene(secret, time).objects).toEqual(evaluateScene(base, time).objects);
+      }
+      const extended = withFinalImages(secret, [{ source: 'data:image/png;base64,fixture', width: 1920, height: 1080, name: 'secret.png' }]);
+      expect(extended.finalImages![0]!.entrance.start).toBeGreaterThan(end.end);
+      expect(evaluateScene(extended, (scroll.start + scroll.end) / 2).finalImages![0]!.visible).toBe(false);
+      expect(withFinalImages(extended, [])).toEqual(secret);
+    }
+  });
+
+  it.each(phrases)('centers the %s finale on the camera after a vertical poster pan', (_id, text) => {
+    const { spec: base } = undecorated(text, 7);
+    const shift = -12;
+    const move = (point: Vec3): Vec3 => [point[0], point[1] + shift, point[2]];
+    const translated: SceneSpec = {
+      ...base,
+      objects: base.objects.map(object => ({
+        ...object, position: move(object.position),
+        assembly: object.assembly ? { ...object.assembly, position: move(object.assembly.position) } : undefined,
+      })),
+      cameraTracks: base.cameraTracks.map(track => ({
+        ...track,
+        from: { ...track.from, position: move(track.from.position), target: move(track.from.target) },
+        to: { ...track.to, position: move(track.to.position), target: move(track.to.target) },
+        controls: track.controls ? [move(track.controls[0]), move(track.controls[1])] : undefined,
+      })),
+    };
+    const secret = applySecretFilm(base);
+    const shifted = applySecretFilm(translated);
+    const exit = secret.objects[0]!.exit!;
+    for (const fraction of [.18, .3, .5, .7, .9, 1]) {
+      const time = exit.start + (exit.end - exit.start) * fraction;
+      const original = evaluateScene(secret, time);
+      const moved = evaluateScene(shifted, time);
+      original.objects.forEach((object, index) => {
+        object.position.forEach((value, axis) => expect(moved.objects[index]!.position[axis]).toBeCloseTo(value + (axis === 1 ? shift : 0), 10));
+        expect(moved.objects[index]!.rotation).toEqual(object.rotation);
+        expect(moved.objects[index]!.scale).toBe(object.scale);
+      });
+      original.camera.position.forEach((value, axis) => expect(moved.camera.position[axis]).toBeCloseTo(value + (axis === 1 ? shift : 0), 10));
+      expect(new Quaternion(...moved.camera.quaternion).angleTo(new Quaternion(...original.camera.quaternion))).toBeLessThan(1e-7);
+    }
   });
 
   it('settles camera orientations at track boundaries, including generated portals', () => {

@@ -60,7 +60,7 @@ describe('authored scene and absolute-time evaluator', () => {
       expect((object.displayText ?? object.text).replace(/\n/g, ' ')).toBe(object.text);
       expect(object.readingInterval[1] - object.readingInterval[0]).toBeGreaterThanOrEqual(0.9);
     });
-    expect(futureDemo.duration).toBe(11.1);
+    expect(futureDemo.duration).toBe(11.3);
     expect(futureDemo.aspect).toBe(9 / 16);
   });
 
@@ -99,7 +99,7 @@ describe('authored scene and absolute-time evaluator', () => {
 
   it('holds the complete poster before the spatial exit, then finishes beyond the camera', () => {
     const hold = futureDemo.cameraTracks.find(track => track.id === 'final-composition')!;
-    expect(hold.end - hold.start).toBeCloseTo(0.4, 8);
+    expect(hold.end - hold.start).toBeCloseTo(0.6, 8);
     expect(FUTURE_POSTER_TIME).toBeGreaterThan(hold.start);
     expect(FUTURE_POSTER_TIME).toBeLessThan(hold.end);
     const start = evaluateScene(futureDemo, hold.start);

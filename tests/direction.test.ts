@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { DIRECTION_STYLES, MotionDirector, nextRemixSeed, sceneSignature, stableSeed, TooLongTextError } from '../src/direction/director';
 import { FUTURE_QUOTE, futureDemo } from '../src/demos/future';
 import { evaluateScene } from '../src/scene/evaluator';
+import type { SceneSpec } from '../src/scene/types';
 import { TextDirector } from '../src/text/director';
-import { measureGroups, measureLine } from '../src/typography/measure';
+import { measureGroups, measureLine, type MeasuredGroup } from '../src/typography/measure';
 
 const corpus = [
   "Le futur n'est pas ce qui nous attend. C'est ce que nous créons.",
@@ -22,6 +23,42 @@ function direct(text: string, seed = 1, previousSignature?: string | readonly st
   return { spec: MotionDirector.direct(analysis, measured, 'califormandy-sunset', seed, previousSignature), analysis, measured };
 }
 
+function posterReadingTime(spec: SceneSpec, index: number): number {
+  const scroll = spec.cameraTracks.find(track => track.id === 'poster-scroll');
+  if (!scroll) return spec.posterTime!;
+  const y = spec.objects[index]!.assembly!.position[1];
+  const progress = Math.max(0, Math.min(1, (scroll.from.position[1] - y) / (scroll.from.position[1] - scroll.to.position[1])));
+  return scroll.start + (scroll.end - scroll.start) * progress;
+}
+
+function expectReadablePosterGroup(spec: SceneSpec, measured: readonly MeasuredGroup[], index: number): void {
+  const object = spec.objects[index]!;
+  const measurement = measured[index]!;
+  const state = evaluateScene(spec, posterReadingTime(spec, index));
+  const placement = state.objects[index]!;
+  const camera = new PerspectiveCamera(spec.fov, spec.aspect, 0.05, 180);
+  camera.position.fromArray(state.camera.position);
+  camera.quaternion.fromArray(state.camera.quaternion);
+  camera.updateMatrixWorld();
+  const opticalSize = object.fontSize * placement.scale;
+  const label = `${spec.sourceText} seed ${spec.seed} ${object.id}`;
+  // Evaluate every phrase when the pan reaches it, using real projection rather
+  // than accepting an assembled object that is permanently outside the frame.
+  for (const x of [-1, 1]) for (const y of [-1, 1]) {
+    const point = new Vector3(x * measurement.width * opticalSize / 2, y * measurement.inkHeight * opticalSize / 2, 0)
+      .add(new Vector3(...placement.position)).project(camera);
+    expect(point.x, label).toBeGreaterThanOrEqual(-0.84);
+    expect(point.x, label).toBeLessThanOrEqual(0.84);
+    expect(point.y, label).toBeGreaterThanOrEqual(-0.64);
+    expect(point.y, label).toBeLessThanOrEqual(0.76);
+    expect(point.z, label).toBeGreaterThan(-1);
+    expect(point.z, label).toBeLessThan(1);
+  }
+  const bottom = new Vector3(...placement.position).project(camera);
+  const top = new Vector3(placement.position[0], placement.position[1] + measurement.capHeight * opticalSize, placement.position[2]).project(camera);
+  expect((top.y - bottom.y) * 640 / 2, label).toBeGreaterThanOrEqual(24);
+}
+
 describe('measured typography and procedural direction', () => {
   it('measures actual kerning and closed counters from the pinned font', () => {
     expect(measureLine('AV').width).toBeLessThan(measureLine('A V').width);
@@ -37,7 +74,9 @@ describe('measured typography and procedural direction', () => {
       const { spec, measured } = direct(text, seed);
       expect(spec.objects.map(object => object.text).join('')).toBe(text);
       expect(spec.duration).toBeGreaterThan(3);
-      expect(spec.duration).toBeLessThanOrEqual(15);
+      const scrollingDuration = spec.cameraTracks.filter(track => track.id === 'poster-scroll' || track.id === 'poster-end')
+        .reduce((sum, track) => sum + track.end - track.start, 0);
+      expect(spec.duration).toBeLessThanOrEqual(15 + scrollingDuration);
       expect(spec).toEqual(direct(text, seed).spec);
       signatures.add(sceneSignature(spec));
       let previousEnd = 0;
@@ -134,36 +173,108 @@ describe('measured typography and procedural direction', () => {
     expect(tunnels).toBeGreaterThan(0);
   });
 
-  it('keeps final poster ink within safe margins and lettering readable at phone size', () => {
+  it('keeps every final poster group inside safe margins when reached and readable at phone size', () => {
     for (const text of corpus) for (let seed = 1; seed <= 20; seed++) {
       const { spec, measured } = direct(text, seed);
       const state = evaluateScene(spec, spec.posterTime!);
-      const camera = new PerspectiveCamera(spec.fov, spec.aspect, 0.05, 180);
-      camera.position.fromArray(state.camera.position);
-      camera.quaternion.fromArray(state.camera.quaternion);
-      camera.updateMatrixWorld();
-      const visible = spec.objects.map((object, index) => ({ object, index })).filter(({ object }) => object.assembly!.position[0] > -20);
-      expect(visible.length).toBeGreaterThan(0);
-      for (const { object, index } of visible) {
-        const placement = state.objects[index]!;
-        const measurement = measured[index]!;
-        const opticalSize = object.fontSize * placement.scale;
-        // Real projection of the conservative visible ink rectangle, including
-        // the final plane depth. Font size by itself says nothing about a phone.
-        for (const x of [-1, 1]) for (const y of [-1, 1]) {
-          const point = new Vector3(x * measurement.width * opticalSize / 2, y * measurement.inkHeight * opticalSize / 2, 0).add(new Vector3(...placement.position)).project(camera);
-          expect(point.x, `${text} seed ${seed} ${object.id}`).toBeGreaterThanOrEqual(-0.84);
-          expect(point.x, `${text} seed ${seed} ${object.id}`).toBeLessThanOrEqual(0.84);
-          expect(point.y, `${text} seed ${seed} ${object.id}`).toBeGreaterThanOrEqual(-0.64);
-          expect(point.y, `${text} seed ${seed} ${object.id}`).toBeLessThanOrEqual(0.76);
-        }
-        const bottom = new Vector3(...placement.position).project(camera);
-        const top = new Vector3(placement.position[0], placement.position[1] + measurement.capHeight * opticalSize, placement.position[2]).project(camera);
-        const phoneCapPixels = (top.y - bottom.y) * 640 / 2;
-        expect(phoneCapPixels, `${text} seed ${seed} ${object.id}`).toBeGreaterThanOrEqual(24);
-      }
+      for (let index = 0; index < spec.objects.length; index++) expectReadablePosterGroup(spec, measured, index);
       // The enlarged portal hero cannot dictate the final optical size.
-      expect(new Set(visible.map(({ object, index }) => Math.round(object.fontSize * state.objects[index]!.scale * 1000))).size).toBe(1);
+      expect(new Set(spec.objects.map((object, index) => Math.round(object.fontSize * state.objects[index]!.scale * 1000))).size).toBe(1);
+    }
+  });
+
+  it('chooses final scrolling from measured geometry instead of a fixed number of text steps', () => {
+    const measuredSpec = (text: string, inkHeight: number) => {
+      const analysis = TextDirector.analyze(text);
+      const measured = measureGroups(analysis).map(group => ({ ...group, width: 3, height: 2, inkHeight, portal: null }));
+      return MotionDirector.direct(analysis, measured, 'califormandy-sunset', 1);
+    };
+    const compact = measuredSpec('A. B. C. D. E. F.', 0.05);
+    const short = measuredSpec('A. B. C. D.', 0.05);
+    const tall = measuredSpec('A. B. C. D.', 2);
+    const taller = measuredSpec('A. B. C. D.', 3);
+    expect(compact.objects).toHaveLength(6);
+    expect(tall.objects).toHaveLength(4);
+    expect(compact.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(false);
+    expect(compact.cameraTracks.some(track => track.id === 'poster-end')).toBe(false);
+    expect(tall.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(true);
+    expect(tall.cameraTracks.some(track => track.id === 'poster-end')).toBe(true);
+    const scrollDuration = (spec: SceneSpec) => {
+      const track = spec.cameraTracks.find(track => track.id === 'poster-scroll')!;
+      return track.end - track.start;
+    };
+    expect(scrollDuration(taller)).toBeGreaterThan(scrollDuration(tall));
+    expect(tall.duration - short.duration).toBeCloseTo(scrollDuration(tall) + 0.6, 7);
+  });
+
+  it('scrolls the complete long final composition downwards before any word departs', () => {
+    const text = Array.from({ length: 12 }, () => 'We create the future together.').join(' ');
+    for (const seed of [1, 7, 11, 77]) {
+      const { spec, measured } = direct(text, seed);
+      const poster = spec.cameraTracks.find(track => track.id === 'poster')!;
+      const scroll = spec.cameraTracks.find(track => track.id === 'poster-scroll')!;
+      const end = spec.cameraTracks.find(track => track.id === 'poster-end')!;
+      expect(scroll).toBeDefined();
+      expect(scroll.start).toBe(poster.end);
+      expect(end.start).toBe(scroll.end);
+      expect(end.end - end.start).toBeCloseTo(0.6, 7);
+      expect(scroll.end - scroll.start).toBeGreaterThanOrEqual(1.2 - 1e-8);
+      expect(scroll.to.position[1]).toBeLessThan(scroll.from.position[1]);
+      const displacement = scroll.to.position[1] - scroll.from.position[1];
+      expect(scroll.to.target[1] - scroll.from.target[1]).toBeCloseTo(displacement, 10);
+      expect(scroll.to.position[0]).toBe(scroll.from.position[0]);
+      expect(scroll.to.position[2]).toBe(scroll.from.position[2]);
+      expect(scroll.to.roll).toBe(scroll.from.roll);
+      expect(spec.duration).toBeLessThanOrEqual(60);
+      expect(spec.objects.map(object => object.text).join('')).toBe(text);
+      for (let index = 0; index < spec.objects.length; index++) {
+        const object = spec.objects[index]!;
+        expect(object.assembly!.position[0]).toBeGreaterThan(-20);
+        expect(object.exit!.start).toBeGreaterThanOrEqual(end.end);
+        if (index > 0) expect(object.assembly!.position[1]).toBeLessThan(spec.objects[index - 1]!.assembly!.position[1]);
+        expectReadablePosterGroup(spec, measured, index);
+      }
+      const settledObjects = evaluateScene(spec, poster.start).objects;
+      const restored: SceneSpec = JSON.parse(JSON.stringify(spec));
+      let previousY = Number.POSITIVE_INFINITY;
+      for (let frame = Math.ceil(scroll.start * spec.fps); frame <= Math.floor(scroll.end * spec.fps); frame++) {
+        const time = frame / spec.fps;
+        const state = evaluateScene(spec, time);
+        expect(state.objects).toEqual(settledObjects);
+        expect(state.camera.position[1]).toBeLessThanOrEqual(previousY);
+        previousY = state.camera.position[1];
+        evaluateScene(spec, spec.duration);
+        evaluateScene(spec, 0);
+        expect(evaluateScene(spec, time)).toEqual(state);
+        expect(evaluateScene(restored, time)).toEqual(state);
+      }
+      for (const boundary of [scroll.start, scroll.end, end.end]) {
+        const before = evaluateScene(spec, boundary - 1e-7);
+        const after = evaluateScene(spec, boundary);
+        expect(new Vector3(...before.camera.position).distanceTo(new Vector3(...after.camera.position))).toBeLessThan(1e-5);
+        expect(new Quaternion(...before.camera.quaternion).angleTo(new Quaternion(...after.camera.quaternion))).toBeLessThan(1e-5);
+      }
+      expect(spec).toEqual(direct(text, seed).spec);
+    }
+  });
+
+  it('fits a near-limit final scan into sixty seconds while preserving complete reading intervals', () => {
+    const text = Array.from({ length: 12 }, () => 'We create the future together.').join(' ');
+    const { spec, analysis, measured } = direct(text, 11);
+    const slowerReading = measured.map(group => ({ ...group, group: { ...group.group, readingDuration: group.group.readingDuration + 0.1 } }));
+    const extended = MotionDirector.direct(analysis, slowerReading, 'califormandy-sunset', spec.seed);
+    const scroll = spec.cameraTracks.find(track => track.id === 'poster-scroll')!;
+    const compressed = extended.cameraTracks.find(track => track.id === 'poster-scroll')!;
+    expect(extended.duration).toBeCloseTo(60, 7);
+    expect(compressed.end - compressed.start).toBeGreaterThanOrEqual(1.2 - 1e-8);
+    expect(compressed.end - compressed.start).toBeLessThan(scroll.end - scroll.start);
+    expect(compressed.from).toEqual(scroll.from);
+    expect(compressed.to).toEqual(scroll.to);
+    expect(extended.objects.map(object => object.text).join('')).toBe(text);
+    for (let index = 0; index < extended.objects.length; index++) {
+      const interval = extended.objects[index]!.readingInterval;
+      expect(interval[1] - interval[0]).toBeCloseTo(Math.round(slowerReading[index]!.group.readingDuration * 30) / 30, 7);
+      expectReadablePosterGroup(extended, slowerReading, index);
     }
   });
 
@@ -241,12 +352,12 @@ describe('measured typography and procedural direction', () => {
       const landed = evaluateScene(spec, poster.start);
       expect(Math.abs(pulse.objects[0]!.scale - landed.objects[0]!.scale)).toBeGreaterThan(0.015);
       expect(spec.posterTime).toBeGreaterThan(poster.start);
-      expect(poster.end - poster.start).toBeCloseTo(0.4, 8);
+      expect(poster.end - poster.start).toBeCloseTo(0.6, 8);
       expect(spec.posterTime).toBeLessThan(poster.end);
     }
   });
 
-  it('ends with a brief visual punctuation rather than a second reading or padded earlier holds', () => {
+  it('keeps final settled holds brief and preserves each original reading duration', () => {
     const texts = [...corpus, 'Oui.', Array.from({ length: 12 }, () => 'We create the future together.').join(' ')];
     for (const text of texts) for (let seed = 1; seed <= 20; seed++) {
       const { spec, measured } = direct(text, seed);
@@ -256,7 +367,7 @@ describe('measured typography and procedural direction', () => {
       const expectedReveal = spec.directionStyle!.reveal === 'spiral' ? 1.35 : 1.1;
       expect(landing.end - reveal.start).toBeCloseTo(Math.round(expectedReveal * 30) / 30, 7);
       expect(poster.start).toBe(landing.end);
-      expect(poster.end - poster.start).toBeCloseTo(0.4, 7);
+      expect(poster.end - poster.start).toBeCloseTo(0.6, 7);
       const lastRead = spec.objects.at(-1)!.readingInterval;
       expect(reveal.start).toBe(lastRead[1]);
       for (let index = 0; index < measured.length; index++) {

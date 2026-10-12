@@ -6,7 +6,7 @@ import { emojiCoverage } from '../typography/emoji';
 import { DEFAULT_FONT_ID, getDisplayFont } from '../typography/fonts';
 import { applySecretFilm } from './secrets';
 
-const GENERATOR_VERSION = 'spatial-grammar-2.2.2';
+const GENERATOR_VERSION = 'spatial-grammar-2.3.1';
 const FPS = 30;
 const FOV = 38;
 const ASPECT = 9 / 16;
@@ -143,31 +143,36 @@ function travelControls(from: CameraPose, to: CameraPose, direction: number): re
 interface PosterPlacement { position: Vec3; scale: number }
 
 function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObject[], variant: number) {
-  // Dense passages end with their conclusion, after every source group has been
-  // read. They never finish with a postage-stamp-sized complete quotation.
-  const displayed = measured.length <= 5 ? measured.map((_, index) => index) : measured.slice(-Math.min(3, measured.length)).map((_, index) => measured.length - Math.min(3, measured.length) + index);
-  const placements: PosterPlacement[] = objects.map((object, index) => ({ position: [-70 - index * 12, -40, -25], scale: 0.65 }));
-  const scale = measured.length <= 5 ? 0.72 : 0.94;
+  const placements: PosterPlacement[] = [];
+  const scale = 0.72;
   // Portal eligibility can enlarge a hero in its reading shot. Restore the
   // common optical size when the permanent objects assemble into the poster.
   const scales = objects.map((object, index) => scale * opticalFontSize(measured[index]!) / object.fontSize);
-  const heights = displayed.map(index => measured[index]!.inkHeight * objects[index]!.fontSize * scales[index]!);
+  const heights = measured.map((group, index) => group.inkHeight * objects[index]!.fontSize * scales[index]!);
   const gap = 0.58;
   const totalHeight = heights.reduce((sum, value) => sum + value, 0) + gap * (heights.length - 1);
-  const largestWidth = Math.max(...displayed.map(index => measured[index]!.width * objects[index]!.fontSize * scales[index]!));
+  const largestWidth = Math.max(...measured.map((group, index) => group.width * objects[index]!.fontSize * scales[index]!));
   let cursor = totalHeight / 2;
   let width = 0;
-  for (let item = 0; item < displayed.length; item++) {
-    const index = displayed[item]!;
+  for (let index = 0; index < objects.length; index++) {
     const textWidth = measured[index]!.width * objects[index]!.fontSize * scales[index]!;
-    const x = displayed.length === 1 || variant === 2 ? 0 : variant === 3 ? (largestWidth - textWidth) / 2 : (item % 2 ? 1 : -1) * Math.min(1.25, textWidth * 0.16) * (variant === 1 ? -1 : 1);
-    const y = cursor - heights[item]! / 2;
-    placements[index] = { position: [x, y, item * 0.12], scale: scales[index]! };
+    const x = objects.length === 1 || variant === 2 ? 0 : variant === 3 ? (largestWidth - textWidth) / 2 : (index % 2 ? 1 : -1) * Math.min(1.25, textWidth * 0.16) * (variant === 1 ? -1 : 1);
+    const y = cursor - heights[index]! / 2;
+    placements[index] = { position: [x, y, 0], scale: scales[index]! };
     width = Math.max(width, textWidth + Math.abs(x) * 2);
-    cursor -= heights[item]! + gap;
+    cursor -= heights[index]! + gap;
   }
-  const distance = Math.max(width / (2 * HALF_ANGLE * ASPECT * 0.78), totalHeight / (2 * HALF_ANGLE * 0.60), 9) + 0.6;
-  return { placements, pose: { position: [0, 0, distance], target: [0, 0, 0], roll: 0 } satisfies CameraPose };
+  // Fit the width and each individual phrase, then scan any vertical overflow.
+  // Actual glyph heights and wrapping decide the pan, rather than a step count.
+  const distance = Math.max(width / (2 * HALF_ANGLE * ASPECT * 0.78), Math.max(...heights) / (2 * HALF_ANGLE * 0.60), 9) + 0.6;
+  const frustumHeight = 2 * HALF_ANGLE * distance;
+  const overflow = Math.max(0, totalHeight - frustumHeight * 0.60);
+  const pose = (y: number): CameraPose => ({ position: [0, y, distance], target: [0, y, 0], roll: 0 });
+  return {
+    placements, pose: pose(overflow / 2), endPose: pose(overflow > 0 ? -overflow / 2 : 0),
+    // Constant reading speed through the stack, with brief rests at both ends.
+    scrollDuration: overflow > 0 ? frameTime(Math.max(1.2, overflow / frustumHeight * 2.4)) : 0,
+  };
 }
 
 function blend(a: Vec3, b: Vec3, t: number): Vec3 {
@@ -270,25 +275,27 @@ function departure(object: SceneObject, measured: MeasuredGroup, index: number, 
   const worldExtent = Math.hypot(measured.width, measured.height) * object.fontSize * scale;
   const toZ = finalPose.position[2] + worldExtent * 3 + 25;
   const span = toZ - p[2];
+  const cameraY = finalPose.position[1];
+  const relativeY = p[1] - cameraY;
   const base = { start, end, easing: 'smooth' as const };
   switch (style.finale) {
     case 'vortex': return {
-      ...base, to: [p[0] + d * 3, p[1] * 0.8, toZ], rotation: [d * 0.25, -0.3, d * (Math.PI * 2 + index * 0.3)], scale: scale * 1.12,
+      ...base, to: [p[0] + d * 3, cameraY + relativeY * 0.8, toZ], rotation: [d * 0.25, -0.3, d * (Math.PI * 2 + index * 0.3)], scale: scale * 1.12,
       // Twist visibly in front of the lens before the final depth acceleration.
-      controls: [[p[0] + d * (2.2 + Math.min(index, 4) * 0.18), p[1] + 1, p[2] + span * 0.03], [-p[0] * 0.25 - d * 2.2, -p[1] * 0.3, p[2] + span * 0.2]],
+      controls: [[p[0] + d * (2.2 + Math.min(index, 4) * 0.18), p[1] + 1, p[2] + span * 0.03], [-p[0] * 0.25 - d * 2.2, cameraY - relativeY * 0.3, p[2] + span * 0.2]],
     };
     case 'staggered-punch': return {
-      ...base, start: frameTime(start + Math.min(index, 4) * 0.1), to: [p[0] * 0.4, p[1] * 0.6, toZ], rotation: [0.08 * d, -0.15 * d, d * 0.24], scale: scale * 1.24,
-      controls: [[p[0], p[1], p[2] + span * 0.36], [p[0] * 0.8, p[1] * 0.8, p[2] + span * 0.77]],
+      ...base, start: frameTime(start + Math.min(index, 4) * 0.1), to: [p[0] * 0.4, cameraY + relativeY * 0.6, toZ], rotation: [0.08 * d, -0.15 * d, d * 0.24], scale: scale * 1.24,
+      controls: [[p[0], p[1], p[2] + span * 0.36], [p[0] * 0.8, cameraY + relativeY * 0.8, p[2] + span * 0.77]],
     };
     case 'fan-out': {
       const side = (index % 2 ? 1 : -1) * d;
       const spread = 9 + index * 1.2;
-      return { ...base, to: [side * spread * 2, p[1] * 2.5, toZ], rotation: [side * 0.55, side * 1.25, side * 0.8], scale: scale * 1.08,
-        controls: [[p[0] + side * spread, p[1] * 1.3, p[2] + span * 0.28], [p[0] + side * spread * 1.8, p[1] * 2, p[2] + span * 0.67]] };
+      return { ...base, to: [side * spread * 2, cameraY + relativeY * 2.5, toZ], rotation: [side * 0.55, side * 1.25, side * 0.8], scale: scale * 1.08,
+        controls: [[p[0] + side * spread, cameraY + relativeY * 1.3, p[2] + span * 0.28], [p[0] + side * spread * 1.8, cameraY + relativeY * 2, p[2] + span * 0.67]] };
     }
-    case 'converging-slam': return { ...base, to: [d * (index - count / 2) * 0.5, 0, toZ], rotation: [0, d * 0.35, d * (index % 2 ? 0.5 : -0.5)], scale: scale * 1.18,
-      controls: [[p[0] * 0.2, p[1] * 0.15, p[2] + span * 0.3], [0, 0, p[2] + span * 0.66]] };
+    case 'converging-slam': return { ...base, to: [d * (index - count / 2) * 0.5, cameraY, toZ], rotation: [0, d * 0.35, d * (index % 2 ? 0.5 : -0.5)], scale: scale * 1.18,
+      controls: [[p[0] * 0.2, cameraY + relativeY * 0.15, p[2] + span * 0.3], [0, cameraY, p[2] + span * 0.66]] };
     default: return { ...base, to: [p[0], p[1], toZ], rotation: [0, 0, 0], scale, controls: [[p[0], p[1], p[2] + span * 0.28], [p[0], p[1], p[2] + span * 0.72]] };
   }
 }
@@ -361,15 +368,22 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   });
   const initialSettle = style.entry === 'corkscrew' ? 1.1 : frameTime(0.75);
   const entranceEnd = style.entry === 'corkscrew' ? 1 : 0.55;
-  // Every phrase has already had its reading interval. The final composition
-  // is a visual punctuation mark, rather than a second reading of the passage.
+  // Short compositions conclude briefly; overflowing stacks get a readable pan.
   // A spiral keeps enough flight time for its full revolution before landing.
   const revealDuration = frameTime(style.reveal === 'spiral' ? 1.35 : 1.1);
-  const posterHold = 0.4;
-  const rushDuration = style.finale === 'staggered-punch' ? 1.35 : style.finale === 'vortex' ? 1.2 : 1.05;
+  const posterHold = 0.6;
+  const posterVariant = DIRECTION_STYLES.reveal.indexOf(style.reveal as typeof DIRECTION_STYLES.reveal[number]);
+  const composition = poster(measured, objects, posterVariant);
+  const finalHold = composition.scrollDuration > 0 ? posterHold : 0;
+  const rushDuration = frameTime(style.finale === 'staggered-punch' ? 1.35 : style.finale === 'vortex' ? 1.2 : 1.05);
   const seamDuration = 0.2;
   const readingDurations = measured.map(group => frameTime(group.group.readingDuration));
-  const initialDuration = initialSettle + readingDurations.reduce((sum, duration) => sum + duration, 0) + transitionDurations.reduce((sum, duration) => sum + duration, 0) + revealDuration + posterHold + rushDuration + seamDuration;
+  const baseDuration = frameTime(initialSettle + readingDurations.reduce((sum, duration) => sum + duration, 0) + transitionDurations.reduce((sum, duration) => sum + duration, 0) + revealDuration + posterHold + rushDuration + seamDuration);
+  // A passage near the limit can scan slightly faster, preserving its full
+  // reading intervals and the 60-second export limit.
+  const availableScrollTime = Math.floor((60 - baseDuration - finalHold) * FPS + 1e-8) / FPS;
+  const scrollTime = composition.scrollDuration > 0 ? Math.min(composition.scrollDuration, Math.max(1.2, availableScrollTime)) : 0;
+  const initialDuration = frameTime(baseDuration + scrollTime + finalHold);
   if (initialDuration > 60) throw new TooLongTextError(initialDuration);
   const tracks: CameraTrack[] = [];
   const chapters: SceneSpec['chapters'][number][] = [];
@@ -428,32 +442,39 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   const revealStart = time;
   const revealEnd = frameTime(time + revealDuration);
   const landingStart = frameTime(revealEnd - 0.3);
-  const posterVariant = DIRECTION_STYLES.reveal.indexOf(style.reveal as typeof DIRECTION_STYLES.reveal[number]);
-  const composition = poster(measured, objects, posterVariant);
   const finalPose = composition.pose;
   for (let index = 0; index < objects.length; index++) {
     objects[index]!.assembly = { start: revealStart, end: revealEnd, ...composition.placements[index]!, rotation: [0, 0, 0], easing: 'cinematic' };
     objects[index]!.impact = { start: landingStart, end: revealEnd, displacement: [0, 0, style.reveal === 'slam' ? 1 : 0.55], rotation: [0, 0, direction * (index % 2 ? 0.03 : -0.03)], scale: style.reveal === 'slam' ? 0.16 : 0.09 };
   }
   const lastPose = poses[poses.length - 1]!;
-  const landingPose: CameraPose = { position: [style.reveal === 'swing' ? direction * 1.6 : 0, style.reveal === 'slam' ? 0.25 : 0, finalPose.position[2] + (style.reveal === 'slam' ? -1.1 : 1.1)], target: finalPose.target, roll: style.reveal === 'swing' ? -direction * 0.18 : 0 };
+  const landingPose: CameraPose = { position: [style.reveal === 'swing' ? direction * 1.6 : 0, finalPose.position[1] + (style.reveal === 'slam' ? 0.25 : 0), finalPose.position[2] + (style.reveal === 'slam' ? -1.1 : 1.1)], target: finalPose.target, roll: style.reveal === 'swing' ? -direction * 0.18 : 0 };
   const revealControls = travelControls(lastPose, landingPose, direction * (style.reveal === 'swing' ? -1 : 1));
-  const revealTrack: CameraTrack = { id: 'reveal-flight', start: revealStart, end: landingStart, primitive: 'REVEAL', from: lastPose, to: landingPose, controls: revealControls, easing: 'cinematic', focusObjectId: objects[objects.length - 1]!.id };
+  const revealFocus = scrollTime > 0 ? {} : { focusObjectId: objects[objects.length - 1]!.id };
+  const revealTrack: CameraTrack = { id: 'reveal-flight', start: revealStart, end: landingStart, primitive: 'REVEAL', from: lastPose, to: landingPose, controls: revealControls, easing: 'cinematic', ...revealFocus };
   if (style.reveal === 'spiral' && !fullRollUsed) { revealTrack.rollTurns = direction; fullRollUsed = true; }
-  if (style.reveal === 'swing') revealTrack.controls = [[lastPose.position[0] + direction * 15, lastPose.position[1] + 8, lastPose.position[2] + 4], [direction * 10, 5, finalPose.position[2] + 8]];
-  if (style.reveal === 'spiral') revealTrack.controls = [[lastPose.position[0] - direction * 10, lastPose.position[1] + 8, lastPose.position[2] + 6], [direction * 8, -4, finalPose.position[2] + 7]];
+  if (style.reveal === 'swing') revealTrack.controls = [[lastPose.position[0] + direction * 15, lastPose.position[1] + 8, lastPose.position[2] + 4], [direction * 10, finalPose.position[1] + 5, finalPose.position[2] + 8]];
+  if (style.reveal === 'spiral') revealTrack.controls = [[lastPose.position[0] - direction * 10, lastPose.position[1] + 8, lastPose.position[2] + 6], [direction * 8, finalPose.position[1] - 4, finalPose.position[2] + 7]];
   tracks.push(revealTrack);
-  tracks.push({ id: 'reveal-impact', start: landingStart, end: revealEnd, primitive: 'REVEAL', from: landingPose, to: finalPose, easing: 'cinematic', focusObjectId: objects[objects.length - 1]!.id, impact: { start: landingStart, end: revealEnd, displacement: [0, 0, style.reveal === 'slam' ? -0.9 : -0.45], rotation: [direction * 0.009, 0, direction * 0.025] } });
+  tracks.push({ id: 'reveal-impact', start: landingStart, end: revealEnd, primitive: 'REVEAL', from: landingPose, to: finalPose, easing: 'cinematic', ...revealFocus, impact: { start: landingStart, end: revealEnd, displacement: [0, 0, style.reveal === 'slam' ? -0.9 : -0.45], rotation: [direction * 0.009, 0, direction * 0.025] } });
   chapters.push({ time: revealStart, objectId: null, primitive: 'REVEAL' });
-  const rushStart = frameTime(revealEnd + posterHold);
-  tracks.push({ id: 'poster', start: revealEnd, end: rushStart, primitive: 'HOLD', from: finalPose, to: finalPose, easing: 'linear' });
+  const posterEnd = frameTime(revealEnd + posterHold);
+  tracks.push({ id: 'poster', start: revealEnd, end: posterEnd, primitive: 'HOLD', from: finalPose, to: finalPose, easing: 'linear' });
   chapters.push({ time: revealEnd, objectId: null, primitive: 'HOLD' });
+  const scrollEnd = frameTime(posterEnd + scrollTime);
+  const rushStart = frameTime(scrollEnd + finalHold);
+  const rushPose = composition.endPose;
+  if (scrollTime > 0) {
+    tracks.push({ id: 'poster-scroll', start: posterEnd, end: scrollEnd, primitive: 'REVEAL', from: finalPose, to: rushPose, easing: 'linear' });
+    tracks.push({ id: 'poster-end', start: scrollEnd, end: rushStart, primitive: 'HOLD', from: rushPose, to: rushPose, easing: 'linear' });
+    chapters.push({ time: posterEnd, objectId: null, primitive: 'REVEAL' }, { time: scrollEnd, objectId: null, primitive: 'HOLD' });
+  }
   const rushEnd = frameTime(rushStart + rushDuration);
-  for (let index = 0; index < objects.length; index++) objects[index]!.exit = departure(objects[index]!, measured[index]!, index, objects.length, rushStart, rushEnd, finalPose, style);
-  tracks.push({ id: `finale-${style.finale}`, start: rushStart, end: rushEnd, primitive: 'DEPTH', from: finalPose, to: finalPose, easing: 'linear', impact: { start: rushStart, end: frameTime(rushStart + 0.3), displacement: [0, 0, -0.35], rotation: [0, 0, direction * 0.018] } });
+  for (let index = 0; index < objects.length; index++) objects[index]!.exit = departure(objects[index]!, measured[index]!, index, objects.length, rushStart, rushEnd, rushPose, style);
+  tracks.push({ id: `finale-${style.finale}`, start: rushStart, end: rushEnd, primitive: 'DEPTH', from: rushPose, to: rushPose, easing: 'linear', impact: { start: rushStart, end: frameTime(rushStart + 0.3), displacement: [0, 0, -0.35], rotation: [0, 0, direction * 0.018] } });
   const duration = frameTime(rushEnd + seamDuration);
   if (duration > 60) throw new TooLongTextError(duration);
-  tracks.push({ id: 'loop-seam', start: rushEnd, end: duration, primitive: 'HOLD', from: finalPose, to: finalPose, easing: 'linear' });
+  tracks.push({ id: 'loop-seam', start: rushEnd, end: duration, primitive: 'HOLD', from: rushPose, to: rushPose, easing: 'linear' });
   chapters.push({ time: rushStart, objectId: null, primitive: 'DEPTH' });
   return {
     id: `generated-${seed >>> 0}-${attempt}`, generatorVersion: GENERATOR_VERSION,

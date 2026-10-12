@@ -24,10 +24,10 @@ describe('optional final image choreography', () => {
   it('preserves every text object, reading frame, poster and original camera motion', () => {
     const spec = withFinalImages(futureDemo, [asset]);
     const image = spec.finalImages![0]!;
-    expect(image.entrance.start).toBe(10.2);
-    expect(image.entrance.end).toBeCloseTo(10.6, 12);
-    expect(image.exit.start).toBeCloseTo(11.4, 12);
-    expect(spec.duration).toBeCloseTo(12.15, 12);
+    expect(image.entrance.start).toBe(10.4);
+    expect(image.entrance.end).toBeCloseTo(10.8, 12);
+    expect(image.exit.start).toBeCloseTo(11.6, 12);
+    expect(spec.duration).toBeCloseTo(12.35, 12);
     expect(spec.objects).toBe(futureDemo.objects);
     expect(spec.sourceText).toBe(futureDemo.sourceText);
     expect(spec.objects.map(object => object.text).join('')).toBe(futureDemo.objects.map(object => object.text).join(''));
@@ -215,7 +215,7 @@ describe('optional final image choreography', () => {
       const state = evaluateScene(spec, Math.max(image.entrance.end, futureDemo.duration) + FINAL_IMAGE_TIMING.hold / 2);
       expect(state.objects).toEqual(finalWords);
       expect(state.finalImages!.filter(image => image.visible).map(image => image.id)).toEqual([image.id]);
-      if (index === 0) expect(image.entrance.start).toBeCloseTo(10.2, 12);
+      if (index === 0) expect(image.entrance.start).toBeCloseTo(10.4, 12);
       else expect(image.entrance.start).toBeCloseTo(spec.finalImages![index - 1]!.exit.start, 12);
       const next = spec.finalImages![index + 1];
       if (next) {

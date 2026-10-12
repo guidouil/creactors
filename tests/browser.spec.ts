@@ -1076,12 +1076,114 @@ test('shows a brief stable final poster without repeating the full quotation rea
         frame: await dev.capture(dev.spec.posterTime!), empty: await dev.capture(dev.spec.duration) };
     }, fixture);
     expect(poster.text).toBe(fixture.text);
-    expect(poster.duration, 'The complete composition is a quick visual conclusion after its words have already been read').toBeGreaterThanOrEqual(0.3);
-    expect(poster.duration).toBeLessThanOrEqual(0.5);
+    expect(poster.duration, 'The complete composition is a quick visual conclusion after its words have already been read').toBeGreaterThanOrEqual(0.5);
+    expect(poster.duration).toBeLessThanOrEqual(0.7);
     expect(poster.states[1]).toEqual(poster.states[0]);
     expect(poster.states[2]).toEqual(poster.states[0]);
     expect(poster.frame).not.toEqual(poster.empty);
     await testInfo.attach(`brief-poster-${fixture.seed}`, { body: Buffer.from(poster.frame.split(',')[1]!, 'base64'), contentType: 'image/png' });
+  }
+  diagnostics.verify();
+});
+
+test('scrolls every phrase of a long final composition from top to bottom before the photo handoff', async ({ page }, testInfo) => {
+  const diagnostics = await openStudio(page);
+  const fixtures = [
+    { fontId: 'barlow-condensed-black', language: 'fr' as const, text: 'Chaque matin ouvre une nouvelle possibilité. Nous avançons ensemble, nous apprenons de nos erreurs et nous inventons des chemins inattendus. Les petites idées deviennent de grandes aventures quand nous prenons le temps de les partager.' },
+    { fontId: 'press-start-2p', language: 'en' as const, text: 'Every morning brings a new possibility. We move forward together, learn from our mistakes and discover unexpected paths. Small ideas become great adventures when we take the time to share them with the people around us.' },
+  ];
+  for (const [index, fixture] of fixtures.entries()) {
+    await page.locator('.font-editor-button').click();
+    await page.locator(`[data-font-id="${fixture.fontId}"]`).click();
+    await expect(page.locator('#font-picker')).not.toBeVisible();
+    const report = await page.evaluate(async fixture => {
+      const dev = (window as unknown as DebugWindow).__CREACTORS_DEV__;
+      await dev.generate(fixture.text, 42, fixture.language);
+      const spec = structuredClone(dev.spec);
+      const scroll = spec.cameraTracks.find(track => track.id === 'poster-scroll')!;
+      if (!scroll) throw new Error('The overflowing final composition has no scrolling shot.');
+      const size = dev.renderer.getSize();
+      dev.renderer.resize(144, 256);
+      const sample = document.createElement('canvas'); sample.width = 144; sample.height = 256;
+      const context = sample.getContext('2d', { willReadFrequently: true })!;
+      dev.seek(0); context.drawImage(dev.renderer.canvas, 0, 0);
+      const background = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      const frames = [];
+      for (let frame = Math.ceil(scroll.start * spec.fps); frame <= Math.floor(scroll.end * spec.fps); frame++) {
+        const time = frame / spec.fps;
+        dev.seek(time); context.drawImage(dev.renderer.canvas, 0, 0);
+        const pixels = context.getImageData(0, 0, 144, 256).data;
+        let visiblePixels = 0;
+        for (let pixel = 0; pixel < pixels.length; pixel += 4) {
+          if ([0, 1, 2].some(channel => Math.abs(pixels[pixel + channel]! - background[channel]!) > 8)) visiblePixels++;
+        }
+        frames.push({ time, camera: dev.state().camera, visiblePixels, readable: dev.bounds().filter(box =>
+          box.min[0]! >= -0.85 && box.max[0]! <= 0.85 && box.min[1]! >= -0.65 && box.max[1]! <= 0.76).map(box => box.id) });
+      }
+      const midpoint = (scroll.start + scroll.end) / 2;
+      dev.seek(midpoint);
+      const direct = structuredClone(dev.state());
+      for (const time of [spec.duration, 0, scroll.end, scroll.start, midpoint]) dev.seek(time);
+      const revisited = structuredClone(dev.state());
+      const sheet = document.createElement('canvas'); sheet.width = 540; sheet.height = 348;
+      const sheetContext = sheet.getContext('2d')!;
+      sheetContext.fillStyle = '#15151e'; sheetContext.fillRect(0, 0, 540, 348);
+      for (const [column, time] of [scroll.start, midpoint, scroll.end].entries()) {
+        dev.seek(time); sheetContext.drawImage(dev.renderer.canvas, column * 180, 28, 180, 320);
+        sheetContext.fillStyle = '#ffffff'; sheetContext.font = '12px sans-serif';
+        sheetContext.fillText(`${fixture.fontId} · ${time.toFixed(2)} s`, column * 180 + 4, 19);
+      }
+      dev.renderer.resize(...size);
+      return { spec, scroll, frames, direct, revisited, contact: sheet.toDataURL('image/png'),
+        first: await dev.capture(0), last: await dev.capture(spec.duration - 1 / spec.fps) };
+    }, fixture);
+    expect(report.spec.fontId).toBe(fixture.fontId);
+    expect(report.spec.objects.length).toBeGreaterThanOrEqual(10);
+    expect(report.spec.objects.length).toBeLessThanOrEqual(20);
+    expect(report.spec.objects.map(object => object.text).join('')).toBe(fixture.text);
+    expect(report.scroll.to.position[1]).toBeLessThan(report.scroll.from.position[1]);
+    expect(report.frames.length).toBeGreaterThan(30);
+    const readable = new Set(report.frames.flatMap(frame => frame.readable));
+    for (const object of report.spec.objects) expect(readable.has(object.id), `${fixture.fontId}: ${object.text} must become fully readable during the scan`).toBe(true);
+    for (const [frameIndex, frame] of report.frames.entries()) {
+      expect(frame.visiblePixels, `${fixture.fontId} at ${frame.time}s must show text`).toBeGreaterThan(100);
+      expect(frame.camera.position[1]).toBeLessThanOrEqual(report.frames[Math.max(0, frameIndex - 1)]!.camera.position[1]);
+      for (const coordinate of [0, 2]) expect(frame.camera.position[coordinate]).toBeCloseTo(report.frames[0]!.camera.position[coordinate]!, 9);
+      for (const coordinate of [0, 1, 2, 3]) expect(frame.camera.quaternion[coordinate]).toBeCloseTo(report.frames[0]!.camera.quaternion[coordinate]!, 9);
+    }
+    expect(report.revisited).toEqual(report.direct);
+    expect(report.last, 'Scrolling must still finish on the empty opening background').toEqual(report.first);
+    const contactPath = testInfo.outputPath(`poster-scroll-${fixture.fontId}.png`);
+    await writeFile(contactPath, Buffer.from(report.contact.split(',')[1]!, 'base64'));
+    await testInfo.attach(`poster-scroll-${fixture.fontId}`, { path: contactPath, contentType: 'image/png' });
+    if (index === fixtures.length - 1) {
+      await page.locator('.image-file').setInputFiles({ name: 'after-scroll.png', mimeType: 'image/png', buffer: await imageFixture(page, 600, 800) });
+      await page.waitForFunction(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.finalImages?.length === 1);
+      const handoff = await page.evaluate(() => {
+        const dev = (window as unknown as DebugWindow).__CREACTORS_DEV__, spec = dev.spec, image = spec.finalImages![0]!;
+        const ending = spec.cameraTracks.find(track => track.id === 'poster-end')!;
+        const size = dev.renderer.getSize(); dev.renderer.resize(72, 128);
+        const canvas = document.createElement('canvas'); canvas.width = 72; canvas.height = 128;
+        const context = canvas.getContext('2d', { willReadFrequently: true })!;
+        dev.seek(0); context.drawImage(dev.renderer.canvas, 0, 0);
+        const background = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3), emptyFrames = [];
+        for (let frame = Math.ceil(ending.start * spec.fps); frame <= Math.floor(image.exit.start * spec.fps); frame++) {
+          dev.seek(frame / spec.fps); context.drawImage(dev.renderer.canvas, 0, 0);
+          const pixels = context.getImageData(0, 0, 72, 128).data;
+          let visiblePixels = 0;
+          for (let pixel = 0; pixel < pixels.length; pixel += 4) {
+            if ([0, 1, 2].some(channel => Math.abs(pixels[pixel + channel]! - background[channel]!) > 8)) visiblePixels++;
+          }
+          if (visiblePixels < 20) emptyFrames.push(frame / spec.fps);
+        }
+        dev.renderer.resize(...size);
+        return { spec, ending, image, emptyFrames };
+      });
+      expect(handoff.spec.objects).toEqual(report.spec.objects);
+      expect(handoff.spec.cameraTracks.slice(0, report.spec.cameraTracks.length)).toEqual(report.spec.cameraTracks);
+      expect(handoff.image.entrance.start).toBeGreaterThanOrEqual(handoff.ending.end);
+      expect(handoff.emptyFrames, 'The photo must follow the complete scan without an internal blank frame').toEqual([]);
+    }
   }
   diagnostics.verify();
 });

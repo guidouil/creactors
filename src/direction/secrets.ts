@@ -121,7 +121,11 @@ function secretExit(object: SceneObject, index: number, spec: SceneSpec, id: Sec
   const point = (at: number, position: Vec3, turn: number, size = 1): MotionKeyframe => ({
     at, position, rotation: [0, 0, turn], scale: scale * size,
   });
-  const start = spec.cameraTracks.find(track => track.id === 'poster')?.end ?? original.start;
+  // A long poster can keep scanning after its opening hold. Preserve the real
+  // departure boundary so the secret gesture cannot interrupt that reading.
+  const start = Math.min(...spec.objects.flatMap(object => object.exit ? [object.exit.start] : []));
+  const cameraY = spec.cameraTracks.at(-1)?.to.position[1] ?? 0;
+  const relativeY = p[1] - cameraY;
   let keyframes: MotionKeyframe[];
   switch (id) {
     case 'gravity':
@@ -135,22 +139,22 @@ function secretExit(object: SceneObject, index: number, spec: SceneSpec, id: Sec
         point(.74, p, 0)];
       break;
     case 'vertigo': {
-      const orbit = (angle: number): Vec3 => [p[0] * Math.cos(angle) - p[1] * Math.sin(angle),
-        p[0] * Math.sin(angle) + p[1] * Math.cos(angle), p[2] - d * .2];
+      const orbit = (angle: number): Vec3 => [p[0] * Math.cos(angle) - relativeY * Math.sin(angle),
+        cameraY + p[0] * Math.sin(angle) + relativeY * Math.cos(angle), p[2] - d * .2];
       keyframes = [point(.22, orbit(side * Math.PI * .4), side * Math.PI * .4, .62),
         point(.52, orbit(side * Math.PI * 1.6), side * Math.PI * 1.6, .62),
         point(.76, p, side * Math.PI * 2, .75)];
       break;
     }
     case 'tunnel':
-      keyframes = [point(.3, [p[0] * .65, p[1] * .65, p[2] - d * .35], 0, .8),
-        point(.65, [p[0] * .2, p[1] * .2, p[2] - d * .7], 0, .55),
-        point(.8, [p[0] * .1, p[1] * .1, p[2] - d * .8], 0, .4)];
+      keyframes = [point(.3, [p[0] * .65, cameraY + relativeY * .65, p[2] - d * .35], 0, .8),
+        point(.65, [p[0] * .2, cameraY + relativeY * .2, p[2] - d * .7], 0, .55),
+        point(.8, [p[0] * .1, cameraY + relativeY * .1, p[2] - d * .8], 0, .4)];
       break;
     case 'supernova': {
       const angle = index * Math.PI * 2 / spec.objects.length + (spec.seed % 7) * Math.PI / 7;
-      keyframes = [point(.24, [p[0] * .55, p[1] * .55, p[2] - d * .14], 0, .36),
-        point(.44, [p[0] * .25, p[1] * .25, p[2] - d * .18], 0, .25),
+      keyframes = [point(.24, [p[0] * .55, cameraY + relativeY * .55, p[2] - d * .14], 0, .36),
+        point(.44, [p[0] * .25, cameraY + relativeY * .25, p[2] - d * .18], 0, .25),
         point(.76, add(p, Math.cos(angle) * w * .3, Math.sin(angle) * h * .22), side * .2, .85)];
       break;
     }
