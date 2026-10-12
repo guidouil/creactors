@@ -155,8 +155,9 @@ every returned GIF; users remain responsible for the rights to content in their
 exported videos. See the [GIPHY terms](https://support.giphy.com/hc/en-us/articles/360028134111-GIPHY-API-Terms-of-Service).
 
 The text field starts with a randomly selected original example in the browser's
-interface language. The dice button offers another: 48 French and 48 English
-phrases are bundled, with independent shuffle bags that avoid repetitions until
+interface language. The dice button offers another: 96 French and 96 English
+phrases are bundled, mixing creative prompts, humor, self-deprecation and dry irony,
+with independent shuffle bags that avoid repetitions until
 each list is exhausted. The current interface language determines the next
 example. Choosing an example only
 updates the draft; CREATE generates its film. Changing interface language leaves
@@ -271,8 +272,8 @@ and iPad devices. Native Safari soundtrack export remains to be confirmed.
 
 The Aa button in the editor and beside the playback controls opens a searchable
 font picker with previews of the current text and labels for each style. Barlow
-Condensed Black, Bungee, Black Ops One, Alfa Slab One, Pixel Arcade, Anton,
-Bebas Neue and Montserrat Bold are bundled for offline use. Pixel Arcade uses
+Condensed Black, Bungee, Black Ops One, Alfa Slab One, Pixel Arcade and
+Montserrat Bold are bundled for offline use. Pixel Arcade uses
 retro pixel outlines with square, unbeveled 3D edges. The editor adjusts size
 to the font's cap height, its widest word and the available width. Films also
 adjust size from measured glyphs and keep wide words whole, including the final

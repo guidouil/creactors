@@ -2,12 +2,6 @@ import { FontLoader, type Font, type FontData } from 'three/addons/loaders/FontL
 import fontUrl from '../../assets/fonts/BarlowCondensed-Black.ttf?inline';
 import coverage from '../../assets/generated/barlow-condensed-black.coverage.json';
 import barlow from '../../assets/generated/barlow-condensed-black.typeface.json';
-import antonUrl from '../../assets/fonts/Anton-Regular.ttf?inline';
-import antonCoverage from '../../assets/generated/anton-regular.coverage.json';
-import anton from '../../assets/generated/anton-regular.typeface.json';
-import bebasUrl from '../../assets/fonts/BebasNeue-Regular.ttf?inline';
-import bebasCoverage from '../../assets/generated/bebas-neue-regular.coverage.json';
-import bebas from '../../assets/generated/bebas-neue-regular.typeface.json';
 import montserratUrl from '../../assets/fonts/Montserrat-Bold.ttf?inline';
 import montserratCoverage from '../../assets/generated/montserrat-bold.coverage.json';
 import montserrat from '../../assets/generated/montserrat-bold.typeface.json';
@@ -73,8 +67,6 @@ registerDisplayFont({ id: 'bungee', name: 'Bungee', family: 'CREACTORS Block', w
 registerDisplayFont({ id: 'black-ops-one', name: 'Black Ops One', family: 'Black Ops One', weight: '400', style: 'normal', url: blackOpsUrl, version: 'black-ops-one-1', typeface: blackOps, metadata: blackOpsCoverage, character: 'stencil' });
 registerDisplayFont({ id: 'alfa-slab-one', name: 'Alfa Slab One', family: 'Alfa Slab One', weight: '400', style: 'normal', url: alfaSlabUrl, version: 'alfa-slab-one-1', typeface: alfaSlab, metadata: alfaSlabCoverage, character: 'slab' });
 registerDisplayFont({ id: 'press-start-2p', name: 'Pixel Arcade', family: 'CREACTORS Arcade', weight: '400', style: 'normal', url: pixelUrl, version: 'pixel-arcade-1', typeface: pixel, metadata: pixelCoverage, character: 'pixel', extrusion: 'square' });
-registerDisplayFont({ id: 'anton', name: 'Anton', family: 'Anton', weight: '400', style: 'normal', url: antonUrl, version: 'anton-1', typeface: anton, metadata: antonCoverage, character: 'block' });
-registerDisplayFont({ id: 'bebas-neue', name: 'Bebas Neue', family: 'Bebas Neue', weight: '400', style: 'normal', url: bebasUrl, version: 'bebas-neue-1', typeface: bebas, metadata: bebasCoverage, character: 'condensed' });
 registerDisplayFont({ id: 'montserrat-bold', name: 'Montserrat Bold', family: 'Montserrat', weight: '700', style: 'normal', url: montserratUrl, version: 'montserrat-bold-1', typeface: montserrat, metadata: montserratCoverage, character: 'geometric' });
 
 export function listDisplayFonts(): readonly DisplayFont[] { return [...fonts.values()]; }

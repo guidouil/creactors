@@ -9,8 +9,6 @@ const notices = await Promise.all([
   ['WebGL SDF Generator', 'node_modules/webgl-sdf-generator/LICENSE.txt'],
   ['Bidi.js', 'node_modules/bidi-js/LICENSE.txt'],
   ['Barlow Condensed Black', 'assets/licenses/BarlowCondensed-OFL.txt'],
-  ['Anton', 'assets/licenses/Anton-OFL.txt'],
-  ['Bebas Neue', 'assets/licenses/BebasNeue-OFL.txt'],
   ['Montserrat Bold', 'assets/licenses/Montserrat-OFL.txt'],
   ['Bungee (CREACTORS Block runtime)', 'assets/licenses/Bungee-OFL.txt'],
   ['Black Ops One', 'assets/licenses/BlackOpsOne-OFL.txt'],

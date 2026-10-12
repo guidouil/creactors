@@ -31,18 +31,18 @@ test('selects bundled fonts for the draft, 3D film and remixes with unclipped re
   const diagnostics = await openStudio(page);
   await page.locator('.font-editor-button').click();
   await expect(page.locator('#font-picker')).toBeVisible();
-  await expect(page.locator('.font-options .font-option')).toHaveCount(8);
+  await expect(page.locator('.font-options .font-option')).toHaveCount(6);
   await page.locator('#font-search').fill('pixel');
   await expect(page.locator('.font-options .font-option')).toHaveCount(1);
   await expect(page.locator('[data-font-id="press-start-2p"] .font-option-character')).toHaveText('8-bit');
   await page.locator('#font-search').fill('');
-  await page.locator('[data-font-id="anton"]').click();
+  await page.locator('[data-font-id="bungee"]').click();
   await expect(page.locator('#font-picker')).not.toBeVisible();
-  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /Anton/);
+  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /CREACTORS Block/);
   await createAndPause(page);
   const original = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
-  expect(original.fontId).toBe('anton');
-  for (const fontId of ['bungee', 'black-ops-one', 'alfa-slab-one', 'press-start-2p', 'bebas-neue', 'montserrat-bold', 'barlow-condensed-black']) {
+  expect(original.fontId).toBe('bungee');
+  for (const fontId of ['black-ops-one', 'alfa-slab-one', 'press-start-2p', 'montserrat-bold', 'barlow-condensed-black']) {
     await page.locator('.font-film-button').click();
     await page.locator(`[data-font-id="${fontId}"]`).click();
     await expect(page.locator('#font-picker')).not.toBeVisible();
@@ -165,9 +165,9 @@ test('requests OS fonts only from an explicit click and recovers after access is
   await page.locator('.font-device-button').click();
   await expect(page.locator('.font-status')).toContainText('Access to device fonts was not granted');
   expect(await page.evaluate(() => (window as unknown as { fontQueries: number }).fontQueries)).toBe(1);
-  await page.locator('[data-font-id="anton"]').click();
+  await page.locator('[data-font-id="bungee"]').click();
   await expect(page.locator('#font-picker')).not.toBeVisible();
-  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /Anton/);
+  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /CREACTORS Block/);
   diagnostics.verify();
 });
 
@@ -178,18 +178,18 @@ test('keeps draft and film font choices independent while editing', async ({ pag
   await page.locator('.edit-button').click();
   await page.locator('.quote-input').fill('Un nouveau brouillon.');
   await page.locator('.font-editor-button').click();
-  await page.locator('[data-font-id="anton"]').click();
+  await page.locator('[data-font-id="bungee"]').click();
   await expect(page.locator('#font-picker')).not.toBeVisible();
   expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec)).toEqual(original);
   await page.locator('.font-film-button').click();
   await page.locator('[data-font-id="montserrat-bold"]').click();
   await expect(page.locator('#font-picker')).not.toBeVisible();
-  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /Anton/);
+  await expect(page.locator('.quote-input')).toHaveCSS('font-family', /CREACTORS Block/);
   await expect(page.locator('.quote-input')).toHaveValue('Un nouveau brouillon.');
   expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec.fontId)).toBe('montserrat-bold');
   await createAndPause(page);
   const created = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
-  expect(created.fontId).toBe('anton');
+  expect(created.fontId).toBe('bungee');
   expect(created.sourceText).toBe('Un nouveau brouillon.');
   diagnostics.verify();
 });

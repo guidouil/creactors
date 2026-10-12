@@ -11,9 +11,11 @@ the SIL Open Font License 1.1; the original notices are in `assets/licenses`.
 | Black Ops One | `BlackOpsOne-Regular.ttf` | 400 | `black-ops-one-regular` | `BlackOpsOne-OFL.txt` |
 | Alfa Slab One | `AlfaSlabOne-Regular.ttf` | 400 | `alfa-slab-one-regular` | `AlfaSlabOne-OFL.txt` |
 | Pixel Arcade (derived from Press Start 2P) | `CREACTORSArcade-Regular.ttf` | 400 | `press-start-2p-regular` | `PressStart2P-OFL.txt` |
-| Anton Regular | `Anton-Regular.ttf` | 400 | `anton-regular` | `Anton-OFL.txt` |
-| Bebas Neue Regular | `BebasNeue-Regular.ttf` | 400 | `bebas-neue-regular` | `BebasNeue-OFL.txt` |
 | Montserrat Bold | `Montserrat-Bold.ttf` | 700 | `montserrat-bold` | `Montserrat-OFL.txt` |
+
+Anton and Bebas Neue sources, generated assets and licenses remain available
+for development (Anton also serves as a local font import fixture). They are
+excluded from the built-in picker and portable HTML to reduce its size.
 
 The original sources come from the official [Google Fonts repository](https://github.com/google/fonts):
 [Barlow Condensed](https://github.com/google/fonts/tree/main/ofl/barlowcondensed),
@@ -26,7 +28,8 @@ The original sources come from the official [Google Fonts repository](https://gi
 [Montserrat](https://github.com/google/fonts/tree/main/ofl/montserrat).
 
 Run `npm run fonts` to regenerate `assets/generated/*.typeface.json` and
-`*.coverage.json`. The script performs no network requests, checks each source's
+`*.coverage.json`, including the unbundled development fonts. The script performs
+no network requests, checks each source's
 pinned SHA-256, verifies the required French characters, and generates glyph
 outlines, metrics, supported codepoints, and kerning pairs. The same source
 metadata and hashes are embedded in both generated files.

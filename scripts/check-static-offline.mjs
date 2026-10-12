@@ -91,7 +91,7 @@ try {
   for (const [fontId, name] of [
     ['bungee', 'Bungee'], ['black-ops-one', 'Black Ops One'], ['alfa-slab-one', 'Alfa Slab One'],
     ['press-start-2p', 'Pixel Arcade'], ['barlow-condensed-black', 'Barlow Condensed Black'],
-    ['bebas-neue', 'Bebas Neue'], ['montserrat-bold', 'Montserrat Bold'], ['anton', 'Anton'],
+    ['montserrat-bold', 'Montserrat Bold'],
   ]) {
     await offline.locator('.font-film-button').click();
     await offline.locator(`[data-font-id="${fontId}"]`).click();
@@ -165,7 +165,7 @@ try {
   if (errors.length) throw new Error(`Offline runtime errors: ${errors.join('; ')}`);
   if (external.length) throw new Error(`External runtime requests: ${external.join('; ')}`);
   const size = (await readFile(resolve(directory, 'index.html'))).byteLength;
-  console.log(`Offline reopening passed at ${base}: animated example welcome, help dialog, eight display fonts, portrait playback, six recorded soundtracks and audio credits, local photo/GIF import, safe waiting/activation of updates, ${installed.manifest.icons.length} maskable icons, ${(size / 1024 / 1024).toFixed(2)} MiB self-contained page, no external requests or runtime errors.`);
+  console.log(`Offline reopening passed at ${base}: animated example welcome, help dialog, six display fonts, portrait playback, six recorded soundtracks and audio credits, local photo/GIF import, safe waiting/activation of updates, ${installed.manifest.icons.length} maskable icons, ${(size / 1024 / 1024).toFixed(2)} MiB self-contained page, no external requests or runtime errors.`);
   await context.close();
 } finally {
   if (browser) await browser.close();
