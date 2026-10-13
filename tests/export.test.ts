@@ -192,6 +192,27 @@ describe('native video export', () => {
     expect(progress.at(-1)).toBe(1);
   });
 
+  it('waits for imported video samples before capturing both codec probes and final frames', async () => {
+    const preview = renderer();
+    preview.renderFrameAsync = vi.fn(async (time: number) => {
+      // The current canvas remains unchanged until the asynchronous decoder ends.
+      await Promise.resolve();
+      preview.renderFrame(time);
+    });
+    const spec = scene();
+    spec.finalImages = [{
+      id: 'video', asset: { name: 'clip.mp4', source: 'thumbnail', width: 16, height: 9, video: { source: 'local', duration: 0.03 } },
+      baseDuration: 0, width: 1, height: 1, position: [0, 0, -9], rotation: [0, 0, 0], scale: 1,
+      entrance: { start: 0, end: 0.01, from: [0, 0, -90], easing: 'linear' },
+      exit: { start: 0.06, end: 0.1, to: [0, 0, 5], easing: 'linear' }, visibleInterval: [0, 0.1],
+    }];
+    await new VideoExporter().export(preview, spec);
+    expect(preview.renderFrameAsync).toHaveBeenCalledTimes(27);
+    expect(mock.jobs[0]!.source.frames.every(frame => frame.renderedTime === 0.05)).toBe(true);
+    expect(mock.jobs[1]!.source.frames.map(frame => frame.renderedTime)).toEqual([0, 1 / 30, 2 / 30]);
+    expect(preview.lastTime).toBe(4.2);
+  });
+
   it('requires real encode/finalize smoke success, then discloses the selected profile', async () => {
     mock.failFinalize = index => index === 0;
     const onProfile = vi.fn();

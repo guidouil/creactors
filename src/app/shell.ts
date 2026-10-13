@@ -2,7 +2,7 @@ import { icon } from './icons';
 import { strings, type Locale } from './i18n';
 import { getTheme, getThemeFamilyId, themeFamilies } from '../themes';
 import { MAX_IMAGE_COUNT } from '../image/types';
-import type { ImageAsset } from '../image/types';
+import type { ImageAsset, MediaPlacement } from '../image/types';
 import type { GiphyResult } from '../image/giphy';
 import { createGiphyPicker } from './giphy-picker';
 import { createFontPicker } from './font-picker';
@@ -54,6 +54,7 @@ export interface AudioDetails extends AudioSettings {
 export interface ImageDetails {
   name: string;
   source: string;
+  video?: ImageAsset['video'];
   attribution?: ImageAsset['attribution'];
   animation?: {
     duration: number;
@@ -81,6 +82,7 @@ export interface Shell {
   onImageImport(callback: (files: File[]) => void): void;
   onGiphySelect(callback: (result: GiphyResult, signal: AbortSignal) => Promise<void>): void;
   onImageRemove(callback: (index: number) => void): void;
+  onMediaPlacementChange(callback: (placement: MediaPlacement) => void): void;
   onAudioImport(callback: (file: File) => void): void;
   onAudioRemove(callback: () => void): void;
   onAudioPreset(callback: (presetId: string) => void): void;
@@ -92,6 +94,7 @@ export interface Shell {
   setTheme(themeId: string, automatic: boolean): void;
   setFont(fontId: string): void;
   setImages(details: ImageDetails[]): void;
+  setMediaPlacement(placement: MediaPlacement): void;
   setImageLoading(loading: boolean): void;
   setAudio(details: AudioDetails | null): void;
   setAudioLoading(loading: boolean): void;
@@ -120,6 +123,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   let fontPickerAppliesToFilm = false;
   let imageDetails: ImageDetails[] = [];
   let imageLoading = false;
+  let mediaPlacement: MediaPlacement = 'after';
   let audioDetails: AudioDetails | null = null;
   let audioLoading = false;
   let audioOpen = false;
@@ -140,12 +144,17 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   let imageImportCallback: (files: File[]) => void = () => undefined;
   let giphySelectCallback: (result: GiphyResult, signal: AbortSignal) => Promise<void> = async () => undefined;
   let imageRemoveCallback: (index: number) => void = () => undefined;
+  let mediaPlacementCallback: (placement: MediaPlacement) => void = () => undefined;
   let audioImportCallback: (file: File) => void = () => undefined;
   let audioRemoveCallback: () => void = () => undefined;
   let audioPresetCallback: (presetId: string) => void = () => undefined;
   let audioChangeCallback: (settings: AudioSettings) => void = () => undefined;
   let localeCallback: (locale: Locale) => void = () => undefined;
 
+  const placementControls = `<div class="image-placement" role="group" hidden>
+    <button type="button" data-media-placement="before" aria-pressed="false"></button>
+    <button type="button" data-media-placement="after" aria-pressed="true"></button>
+  </div>`;
   host.innerHTML = `
     <div class="studio" data-state="idle" data-editing="true">
       <header class="masthead">
@@ -175,8 +184,9 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
             <button class="image-editor-button image-button icon-button" type="button">${icon('image')}</button>
           </div>
           <button class="create-button" type="button"><span class="create-label"></span>${icon('arrow')}</button>
-          <input class="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/gif,.png,.jpg,.jpeg,.webp,.avif,.gif" multiple hidden>
+          <input class="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/gif,video/mp4,video/webm,video/quicktime,.png,.jpg,.jpeg,.webp,.avif,.gif,.mp4,.m4v,.webm,.mov" multiple hidden>
           <div class="image-editor-source image-source-row image-gallery" hidden></div>
+          <div class="image-editor-placement">${placementControls}</div>
           <div class="image-editor-attributions image-attributions" hidden></div>
         </section>
         <section class="film-panel">
@@ -207,6 +217,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
                 </div>
               </div>
               <div class="image-film-source image-source-row image-gallery" hidden></div>
+              <div class="image-film-placement">${placementControls}</div>
               <div class="image-film-attributions image-attributions" hidden></div>
               <div class="theme-switch" role="group">
                 <button class="theme-auto icon-button" type="button" data-theme="auto">${icon('cycle')}</button>
@@ -371,6 +382,8 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   const fontButtons = [...host.querySelectorAll<HTMLButtonElement>('.font-button')];
   const imageGalleries = [...host.querySelectorAll<HTMLElement>('.image-gallery')];
   const imageAttributions = [...host.querySelectorAll<HTMLElement>('.image-attributions')];
+  const placementGroups = [...host.querySelectorAll<HTMLElement>('.image-placement')];
+  const placementButtons = [...host.querySelectorAll<HTMLButtonElement>('[data-media-placement]')];
   const giphyPicker = createGiphyPicker(studio, {
     getLocale: () => locale,
     onSelect: (result, signal) => giphySelectCallback(result, signal),
@@ -618,6 +631,11 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     const button = (event.target as Element).closest<HTMLButtonElement>('.image-remove-button');
     if (button && !button.disabled) imageRemoveCallback(Number(button.dataset.imageIndex));
   });
+  for (const button of placementButtons) button.addEventListener('click', () => {
+    if (!button.disabled && button.dataset.mediaPlacement !== mediaPlacement) {
+      mediaPlacementCallback(button.dataset.mediaPlacement as MediaPlacement);
+    }
+  });
   audio.addEventListener('click', () => {
     audioOpen = !audioOpen;
     updateAudio();
@@ -785,6 +803,17 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     studio.dataset.hasImage = String(imageDetails.length > 0);
     studio.dataset.imageCount = String(imageDetails.length);
     studio.dataset.hasGiphy = String(imageDetails.some(image => image.attribution?.provider === 'giphy'));
+    studio.dataset.mediaPlacement = mediaPlacement;
+    for (const group of placementGroups) {
+      group.hidden = !imageDetails.length;
+      group.setAttribute('aria-label', copy.mediaPlacement);
+    }
+    for (const button of placementButtons) {
+      button.disabled = blocked;
+      const placement = button.dataset.mediaPlacement as MediaPlacement;
+      button.textContent = placement === 'before' ? copy.mediaBeforeText : copy.mediaAfterText;
+      button.setAttribute('aria-pressed', String(placement === mediaPlacement));
+    }
     giphyPicker.setBusy(blocked);
     giphyPicker.setCount(imageDetails.length);
     const full = imageDetails.length >= MAX_IMAGE_COUNT;
@@ -801,11 +830,14 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
       for (const item of gallery.querySelectorAll<HTMLElement>('.image-item')) {
         const details = imageDetails[Number(item.dataset.imageIndex)];
         if (!details) continue;
-        const label = details.animation ? `${details.name} · ${copy.imageAnimated}` : details.name;
+        const label = details.video ? `${details.name} · ${copy.videoMedia}`
+          : details.animation ? `${details.name} · ${copy.imageAnimated}` : details.name;
         item.title = label;
         item.querySelector<HTMLImageElement>('.image-thumb')!.alt = label;
         const badge = item.querySelector<HTMLElement>('.image-gif-badge');
         if (badge) badge.title = copy.imageAnimated;
+        const videoBadge = item.querySelector<HTMLElement>('.image-video-badge');
+        if (videoBadge) videoBadge.title = copy.videoMedia;
       }
       for (const button of gallery.querySelectorAll<HTMLButtonElement>('.image-remove-button')) {
         const details = imageDetails[Number(button.dataset.imageIndex)];
@@ -835,10 +867,10 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
         remove.dataset.imageIndex = String(index);
         remove.innerHTML = icon('cancel');
         item.append(thumbnail, name, remove);
-        if (details.animation) {
+        if (details.animation || details.video) {
           const badge = document.createElement('span');
-          badge.className = 'image-gif-badge';
-          badge.textContent = 'GIF';
+          badge.className = details.video ? 'image-video-badge' : 'image-gif-badge';
+          badge.textContent = details.video ? '▶' : 'GIF';
           badge.setAttribute('aria-hidden', 'true');
           badge.style.cssText = 'position:absolute;left:2px;bottom:2px;padding:2px 3px;border-radius:2px;background:var(--page);color:var(--white);font-size:8px;line-height:1;pointer-events:none';
           item.append(badge);
@@ -1047,6 +1079,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     onImageImport(callback) { imageImportCallback = callback; },
     onGiphySelect(callback) { giphySelectCallback = callback; },
     onImageRemove(callback) { imageRemoveCallback = callback; },
+    onMediaPlacementChange(callback) { mediaPlacementCallback = callback; },
     onAudioImport(callback) { audioImportCallback = callback; },
     onAudioRemove(callback) { audioRemoveCallback = callback; },
     onAudioPreset(callback) { audioPresetCallback = callback; },
@@ -1096,6 +1129,10 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
       renderImageGalleries();
       updateImage();
       if (removedFocusedImage) find<HTMLButtonElement>(editing ? '.image-editor-button' : '.image-film-button').focus({ preventScroll: true });
+    },
+    setMediaPlacement(placement) {
+      mediaPlacement = placement;
+      updateImage();
     },
     setImageLoading(loading) {
       imageLoading = loading;

@@ -75,9 +75,10 @@ replay and export retain the resolved seed and choreography. The authored film
 remains available through its fixed seed in development inspection.
 
 Preview loops continuously. After each phrase has been read, the final
-composition settles briefly for 0.6 seconds. When its measured text height
-exceeds the visible frame, the camera scans the complete composition from top
-to bottom at a readable size, with a brief hold at the bottom. The scan adapts
+composition settles briefly for 0.6 seconds. The camera first fits the complete
+composition inside the safe frame, keeping capitals at least 24 pixels high on
+a 360px-wide phone. Only when that complete view would make the lettering too
+small does it scan from top to bottom, with a brief hold at the bottom. The scan adapts
 to the font and line wrapping and fits within the 60-second film limit. Then the
 physical text objects accelerate through the camera and leave an empty frame
 matching the opening. Pause, replay, REMIX, download and theme controls sit below
@@ -96,20 +97,25 @@ initial scale. Vertical scrolling remains available, including inside dialogs
 and the text editor; horizontal photo and color galleries still scroll normally.
 
 The discreet question-mark button in the header opens a short French/English
-help dialog covering text and examples, REMIX, colors, music, up to five final
-photos or GIFs and portrait video downloads. It is available before or after generation;
+help dialog covering text and examples, REMIX, colors, music, up to five
+photos, GIFs or videos and portrait video downloads. It is available before or after generation;
 opening it retains the current film. Escape, the close button or a click outside
 the dialog closes it and restores keyboard focus. Help is also bundled offline.
 
-The image button opens a final-media picker with local import and GIPHY search.
+The image button opens a media picker with local import and GIPHY search.
 Search opens on trending GIFs, accepts an explicit search submission, and offers
 paginated results in GIPHY's original order. Loading, empty results, missing or
 invalid configuration, rate limits and network failures retain local import and
 the current film. Closing the picker cancels a pending download. Result cards
 show source/creator attribution and the official Powered By GIPHY mark.
 
-The image button adds up to five local photos or animated GIFs, either before
-CREATE or beside the playback controls. They appear in selection order after the complete text:
+The image button adds up to five local photos, animated GIFs or videos, either before
+CREATE or beside the playback controls. The gallery offers **Before the text** and
+**After the text** (the default). The choice applies to all selected media in their
+selection order, remains selected through CREATE and REMIX, and can be changed
+on an existing film without regenerating the typography. Before-text media plays
+against the opening camera, then hands off to the complete original text choreography.
+After-text media follows the complete text:
 the first approaches in 0.4 seconds during the words' final departure, eliminating
 the internal empty pause without changing the reading shots or final text poster.
 Each photo approaches from the background, holds briefly, then accelerates through the
@@ -119,8 +125,8 @@ empty frame to preserve the video loop. The first photo receives a full reading
 hold after the words have left; subsequent still photos start 1.15 seconds apart.
 Each GIF plays for at least one full cycle while settled; longer GIFs extend the
 ending and the next media's arrival accordingly. The complete film stays within
-60 seconds. Removing individual media updates the ending without regenerating
-the typography. REMIX keeps the selected photos and GIFs.
+60 seconds. Removing individual media updates the sequence without regenerating
+the typography. REMIX keeps the selected photos, GIFs, videos and their placement.
 
 PNG, JPEG, WebP, browser-supported AVIF and GIF files are accepted, up to 16 MiB each.
 Images stay on the device and are embedded in the prepared scene. Import retains
@@ -128,6 +134,17 @@ orientation, transparency and aspect ratio, downsampling large images to a
 maximum edge of 2048 pixels to bound texture memory. Photos fit intact inside the
 portrait frame and keep their colors when the theme changes. Preview and video
 export evaluate their movements from the same absolute-time scene specification.
+
+Local MP4, WebM and MOV video clips are accepted when their video codec is
+decodable by the browser, up to 64 MiB and 30 seconds each. The first decoded frame
+becomes the gallery thumbnail. Each clip plays once in full after its arrival and
+holds its final frame during departure. Its original audio is muted; the chosen
+film soundtrack remains available. Encoded video stays in the current session,
+with decoded frames resized to a maximum edge of 2048 pixels as needed, without
+retaining all decoded frames in memory. Preview coalesces timestamp requests;
+export waits for the exact video frame at each film timestamp. Imports, seeking
+and export work offline after the application has loaded. Unsupported or corrupt
+clips leave the previous film available. The complete film retains its 60-second limit.
 
 GIFs are decoded locally with bundled `gifuct-js`, preserving variable frame
 delays, transparency and partial-frame disposal. Their normalized PNG frames use

@@ -1,5 +1,5 @@
 /** Serializable scene data. Three.js resources belong to the renderer, never here. */
-import type { ImageAsset } from '../image/types';
+import type { ImageAsset, MediaPlacement } from '../image/types';
 import type { SecretFilmId } from '../direction/secrets';
 
 export type Vec3 = readonly [number, number, number];
@@ -131,7 +131,7 @@ export interface SceneChapter {
 export interface FinalImageObject {
   id: string;
   asset: ImageAsset;
-  /** Original duration before this optional ending was appended. */
+  /** Original text-film duration before the optional media sequence. */
   baseDuration: number;
   /** Preserve the original reduced-motion/text inspection frame when removed. */
   basePosterTime?: number;
@@ -143,7 +143,7 @@ export interface FinalImageObject {
   scale: number;
   entrance: NonNullable<SceneObject['entrance']>;
   exit: NonNullable<SceneObject['exit']>;
-  /** Start-inclusive/end-exclusive; the image never exists in earlier shots. */
+  /** Start-inclusive/end-exclusive; the media never appears outside its shot. */
   visibleInterval: readonly [number, number];
 }
 
@@ -182,6 +182,12 @@ export interface SceneSpec {
   cameraTracks: readonly CameraTrack[];
   chapters: readonly SceneChapter[];
   finalImages?: readonly FinalImageObject[];
+  /** Original choreography retained exactly when media precedes the text. */
+  mediaSequence?: {
+    placement: MediaPlacement;
+    textOffset: number;
+    base: Pick<SceneSpec, 'duration' | 'posterTime' | 'objects' | 'cameraTracks' | 'chapters'>;
+  };
 }
 
 export interface EvaluatedObject {

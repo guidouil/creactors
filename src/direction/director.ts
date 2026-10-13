@@ -6,10 +6,15 @@ import { emojiCoverage } from '../typography/emoji';
 import { DEFAULT_FONT_ID, getDisplayFont } from '../typography/fonts';
 import { applySecretFilm } from './secrets';
 
-const GENERATOR_VERSION = 'spatial-grammar-2.3.1';
+const GENERATOR_VERSION = 'spatial-grammar-2.3.2';
 const FPS = 30;
 const FOV = 38;
 const ASPECT = 9 / 16;
+const POSTER_REFERENCE_HEIGHT = 640;
+const MIN_POSTER_CAP_PIXELS = 24;
+// NDC safe bounds [-0.64, 0.76]: 18% below and 12% above the lettering.
+const POSTER_SAFE_HEIGHT = 0.70;
+const POSTER_SAFE_CENTER = 0.06;
 const HALF_ANGLE = Math.tan(FOV * Math.PI / 360);
 const NEAR_PLANE = 0.05;
 const NEAR_FRUSTUM_CORNER = NEAR_PLANE * HALF_ANGLE * Math.hypot(1, ASPECT);
@@ -150,9 +155,9 @@ function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObjec
   const scales = objects.map((object, index) => scale * opticalFontSize(measured[index]!) / object.fontSize);
   const heights = measured.map((group, index) => group.inkHeight * objects[index]!.fontSize * scales[index]!);
   const gap = 0.58;
-  const totalHeight = heights.reduce((sum, value) => sum + value, 0) + gap * (heights.length - 1);
+  const inkHeight = heights.reduce((sum, value) => sum + value, 0) + gap * (heights.length - 1);
   const largestWidth = Math.max(...measured.map((group, index) => group.width * objects[index]!.fontSize * scales[index]!));
-  let cursor = totalHeight / 2;
+  let cursor = inkHeight / 2;
   let width = 0;
   for (let index = 0; index < objects.length; index++) {
     const textWidth = measured[index]!.width * objects[index]!.fontSize * scales[index]!;
@@ -162,12 +167,26 @@ function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObjec
     width = Math.max(width, textWidth + Math.abs(x) * 2);
     cursor -= heights[index]! + gap;
   }
-  // Fit the width and each individual phrase, then scan any vertical overflow.
-  // Actual glyph heights and wrapping decide the pan, rather than a step count.
-  const distance = Math.max(width / (2 * HALF_ANGLE * ASPECT * 0.78), Math.max(...heights) / (2 * HALF_ANGLE * 0.60), 9) + 0.6;
-  const frustumHeight = 2 * HALF_ANGLE * distance;
-  const overflow = Math.max(0, totalHeight - frustumHeight * 0.60);
-  const pose = (y: number): CameraPose => ({ position: [0, y, distance], target: [0, y, 0], roll: 0 });
+  // Keep compact ink spacing, but frame the full rendered footprint: SDF
+  // blocks include font ascenders/descenders; extrusions also include bevels.
+  const framingHeights = measured.map((group, index) => (objects[index]!.extruded ? group.inkHeight + 0.016 : Math.max(group.height, group.inkHeight)) * objects[index]!.fontSize * scales[index]!);
+  const top = Math.max(...placements.map((placement, index) => placement.position[1] + framingHeights[index]! / 2));
+  const bottom = Math.min(...placements.map((placement, index) => placement.position[1] - framingHeights[index]! / 2));
+  const totalHeight = top - bottom;
+  const center = (top + bottom) / 2;
+  for (const placement of placements) placement.position = [placement.position[0], placement.position[1] - center, placement.position[2]];
+  const frontDepth = Math.max(...objects.map((object, index) => object.extruded ? object.extrusionDepth * scales[index]! / 2 + 0.008 * object.fontSize * scales[index]! : 0));
+  // First try fitting the complete stack. A small pullback often fits a short
+  // quotation without needing a pan; keep capitals readable on a 360px phone.
+  const phraseDistance = Math.max(width / (2 * HALF_ANGLE * ASPECT * 0.78), Math.max(...framingHeights) / (2 * HALF_ANGLE * POSTER_SAFE_HEIGHT), 9) + 0.6 + frontDepth;
+  const fitDistance = Math.max(phraseDistance, totalHeight / (2 * HALF_ANGLE * POSTER_SAFE_HEIGHT) + 0.6 + frontDepth);
+  const capHeight = Math.min(...measured.map((group, index) => group.capHeight * objects[index]!.fontSize * scales[index]!));
+  const fittedCapPixels = capHeight * POSTER_REFERENCE_HEIGHT / (2 * HALF_ANGLE * fitDistance);
+  const distance = fittedCapPixels >= MIN_POSTER_CAP_PIXELS ? fitDistance : phraseDistance;
+  // The closest face of extruded lettering must also stay inside the safe frame.
+  const frustumHeight = 2 * HALF_ANGLE * (distance - frontDepth);
+  const overflow = Math.max(0, totalHeight - frustumHeight * POSTER_SAFE_HEIGHT);
+  const pose = (y: number): CameraPose => ({ position: [0, y - frustumHeight * POSTER_SAFE_CENTER / 2, distance], target: [0, y - frustumHeight * POSTER_SAFE_CENTER / 2, 0], roll: 0 });
   return {
     placements, pose: pose(overflow / 2), endPose: pose(overflow > 0 ? -overflow / 2 : 0),
     // Constant reading speed through the stack, with brief rests at both ends.

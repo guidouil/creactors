@@ -20,7 +20,8 @@ import type { AudioTrack } from './audio/types';
 import { getBuiltinAudio, isBuiltinAudioId, type BuiltinAudioId } from './audio/choices';
 import { loadBuiltinAudio } from './audio/recordings';
 import { importImage, ImageImportError, MAX_IMAGE_FILE_BYTES } from './image/importer';
-import { MAX_IMAGE_COUNT, type ImageAsset } from './image/types';
+import { importMedia, VideoImportError, MAX_VIDEO_FILE_BYTES, MAX_VIDEO_DURATION } from './image/video';
+import { MAX_IMAGE_COUNT, type ImageAsset, type MediaPlacement } from './image/types';
 import { downloadGiphyGif, GiphyError } from './image/giphy';
 import { withFinalImages, FinalImageDurationError } from './scene/final-image';
 
@@ -45,6 +46,7 @@ let renderer!: SceneRenderer;
 let baseSpec: SceneSpec = { ...futureDemo, themeId: initialTheme.id };
 let spec: SceneSpec = baseSpec;
 let imageAssets: ImageAsset[] = [];
+let mediaPlacement: MediaPlacement = 'after';
 let analysis: TextAnalysis | null = null;
 let themeId = spec.themeId;
 let selectedThemeFamily: string | null = null;
@@ -226,11 +228,11 @@ function syncFilm(preserveEditing = false) {
   shell.setFilm({ text: spec.sourceText, language: spec.inputLanguage, duration: spec.duration, seed: spec.seed, themeId, fontId: spec.fontId ?? DEFAULT_FONT_ID, secretFilm: spec.secretFilm }, preserveEditing);
 }
 
-/** Replace only the optional ending, retaining the existing text direction. */
-async function applyImages(nextAssets: ImageAsset[], signal?: AbortSignal): Promise<void> {
+/** Replace the optional media sequence, retaining the existing text direction. */
+async function applyImages(nextAssets: ImageAsset[], signal?: AbortSignal, placement = mediaPlacement): Promise<void> {
   signal?.throwIfAborted();
   if (started) {
-    const nextSpec = withFinalImages(baseSpec, nextAssets);
+    const nextSpec = withFinalImages(baseSpec, nextAssets, placement);
     const previousSpec = spec;
     try { await renderer.prepare(nextSpec); signal?.throwIfAborted(); }
     catch (error) {
@@ -239,19 +241,29 @@ async function applyImages(nextAssets: ImageAsset[], signal?: AbortSignal): Prom
       throw error;
     }
     spec = nextSpec;
+    // A valid replacement can recover from a failed clip decoder. A lost WebGL
+    // context still waits for the existing context-restoration flow.
+    renderingFailed = renderer.renderer.getContext().isContextLost();
     syncAudio();
     syncFilm(true);
     draw(Math.min(current, spec.duration));
+    if (!renderingFailed) shell.setState(current >= spec.duration ? 'ended' : 'paused');
     releaseDownload();
     exportHeight = 1920;
   }
   imageAssets = nextAssets;
+  mediaPlacement = placement;
+  shell.setMediaPlacement(mediaPlacement);
   shell.setImages(imageAssets);
   if (started) window.dispatchEvent(new Event('creactors:scene'));
 }
 
 function showImageError(error: unknown) {
   showMessage(copy => error instanceof FinalImageDurationError ? copy.imageDurationError
+    : error instanceof VideoImportError && error.kind === 'size' ? copy.videoImportSize(MAX_VIDEO_FILE_BYTES / 1024 / 1024)
+    : error instanceof VideoImportError && error.kind === 'duration' ? copy.videoDurationError(MAX_VIDEO_DURATION)
+    : error instanceof VideoImportError && error.kind === 'dimensions' ? copy.videoDimensionsError
+    : error instanceof VideoImportError ? copy.videoDecodeError
     : error instanceof ImageImportError && error.kind === 'size' ? copy.imageImportSize(MAX_IMAGE_FILE_BYTES / 1024 / 1024)
     : error instanceof ImageImportError && error.kind === 'dimensions' ? copy.imageDimensionsError
     : error instanceof ImageImportError && error.kind === 'animation' ? copy.imageAnimationError
@@ -260,6 +272,7 @@ function showImageError(error: unknown) {
 
 async function boot() {
   renderer = new SceneRenderer(shell.canvas);
+  renderer.onMediaError = failRenderer;
   const initialSpecification = loadDisplayFont().then(() => {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
     const initialAnalysis = TextDirector.analyze(initialExample, 'auto');
@@ -320,7 +333,7 @@ async function generate(text: string, language: InputLanguage, seed = stableSeed
         ? chooseTheme(nextBase.seed, colorScheme, themeMode === 'vary' ? recentThemeIds : [])
         : resolveTheme(selectedThemeFamily, colorScheme);
     nextBase.themeId = nextTheme.id;
-    const nextSpec = withFinalImages(nextBase, imageAssets);
+    const nextSpec = withFinalImages(nextBase, imageAssets, mediaPlacement);
     await renderer.prepare(nextSpec);
     baseSpec = nextBase;
     spec = nextSpec;
@@ -390,7 +403,7 @@ shell.onFontChange(async (fontId, applyToFilm) => {
     await ready;
     const nextAnalysis = analysis ?? TextDirector.analyze(spec.sourceText, spec.inputLanguage);
     const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId), themeId, spec.seed);
-    const nextSpec = withFinalImages(nextBase, imageAssets);
+    const nextSpec = withFinalImages(nextBase, imageAssets, mediaPlacement);
     await renderer.prepare(nextSpec);
     baseSpec = nextBase;
     spec = nextSpec;
@@ -472,7 +485,7 @@ shell.onImageImport(async files => {
   try {
     const added: ImageAsset[] = [];
     // Bound decoding memory: never decode five full-size photographs together.
-    for (const file of files) added.push(await importImage(file));
+    for (const file of files) added.push(await importMedia(file));
     await applyImages([...imageAssets, ...added]);
   } catch (error) { showImageError(error); }
   finally {
@@ -497,6 +510,26 @@ shell.onImageRemove(async index => {
     followSystemAppearance();
     startStartupPreview();
   }
+});
+
+shell.onMediaPlacementChange(async placement => {
+  if (busy || placement === mediaPlacement) return;
+  const resume = playing && started;
+  pause();
+  busy = true;
+  shell.setImageLoading(true);
+  showMessage(null);
+  try {
+    await applyImages(imageAssets, undefined, placement);
+    if (started) { draw(0); shell.setState('paused'); }
+  } catch (error) { showImageError(error); }
+  finally {
+    busy = false;
+    shell.setImageLoading(false);
+    followSystemAppearance();
+    startStartupPreview();
+  }
+  if (resume && !renderingFailed) void play();
 });
 
 shell.onAudioImport(async file => {
@@ -661,8 +694,15 @@ if (import.meta.env.DEV) {
       await ready;
       const size = renderer.getSize();
       pause();
-      try { renderer.resize(1080, 1920); draw(time); return shell.canvas.toDataURL('image/png'); }
-      finally { renderer.resize(...size); }
+      try {
+        renderer.resize(1080, 1920);
+        draw(time);
+        await renderer.renderFrameAsync(current);
+        return shell.canvas.toDataURL('image/png');
+      } finally {
+        renderer.resize(...size);
+        await renderer.renderFrameAsync(current);
+      }
     },
     get renderer() { return renderer; },
   };

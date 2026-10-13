@@ -152,7 +152,9 @@ export class VideoExporter {
           await guard.wait(job.output.start());
           for (let index = 0; index < 24; index++) {
             // Include typography rather than testing only the loop's empty frame.
-            renderer.renderFrame(Math.min(1 + index / 30, spec.duration / 2));
+            const time = Math.min(1 + index / 30, spec.duration / 2);
+            if (spec.finalImages?.some(image => image.asset.video)) await guard.wait(renderer.renderFrameAsync(time));
+            else renderer.renderFrame(time);
             if (job.audio) await guard.wait(job.audio.add(index));
             await guard.wait(job.encoder.add(index / 30, 1 / 30, { keyFrame: index === 0 }));
           }
@@ -176,7 +178,8 @@ export class VideoExporter {
       await guard.wait(job.output.start());
       for (let index = 0; index < frames; index++) {
         guard.check();
-        renderer.renderFrame(index / 30);
+        if (spec.finalImages?.some(image => image.asset.video)) await guard.wait(renderer.renderFrameAsync(index / 30));
+        else renderer.renderFrame(index / 30);
         if (job.audio) await guard.wait(job.audio.add(index));
         // add() captures synchronously before yielding. Never retain frame arrays
         // and always respect both writer and encoder backpressure.

@@ -1086,6 +1086,43 @@ test('shows a brief stable final poster without repeating the full quotation rea
   diagnostics.verify();
 });
 
+test('keeps a complete readable final composition stationary across fonts when it fits', async ({ page }, testInfo) => {
+  const diagnostics = await openStudio(page);
+  const cases = [
+    { fontId: 'montserrat-bold', text: FUTURE_QUOTE, language: 'fr' as const },
+    { fontId: 'bungee', text: FUTURE_QUOTE, language: 'fr' as const },
+    { fontId: 'black-ops-one', text: 'Change starts with us. We build it together. Every day matters.', language: 'en' as const },
+  ];
+  for (const fixture of cases) {
+    await page.locator('.font-editor-button').click();
+    await page.locator(`[data-font-id="${fixture.fontId}"]`).click();
+    const report = await page.evaluate(async fixture => {
+      const dev = (window as unknown as DebugWindow).__CREACTORS_DEV__;
+      await dev.generate(fixture.text, 1, fixture.language);
+      const spec = structuredClone(dev.spec);
+      const poster = spec.cameraTracks.find(track => track.id === 'poster')!;
+      dev.seek((poster.start + poster.end) / 2);
+      const bounds = dev.bounds();
+      const earlier = structuredClone(dev.state());
+      dev.seek(poster.end - 1 / spec.fps);
+      return { spec, poster, bounds, earlier, later: dev.state(), frame: await dev.capture(spec.posterTime!) };
+    }, fixture);
+    expect(report.spec.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(false);
+    expect(report.spec.objects.map(object => object.text).join('')).toBe(fixture.text);
+    expect(report.later.camera).toEqual(report.earlier.camera);
+    expect(report.later.objects).toEqual(report.earlier.objects);
+    expect(report.poster.end - report.poster.start).toBeCloseTo(0.6, 8);
+    for (const box of report.bounds) {
+      expect(box.min[0], `${fixture.fontId} ${box.id}`).toBeGreaterThanOrEqual(-0.84);
+      expect(box.max[0], `${fixture.fontId} ${box.id}`).toBeLessThanOrEqual(0.84);
+      expect(box.min[1], `${fixture.fontId} ${box.id}`).toBeGreaterThanOrEqual(-0.64);
+      expect(box.max[1], `${fixture.fontId} ${box.id}`).toBeLessThanOrEqual(0.76);
+    }
+    await testInfo.attach(`stationary-poster-${fixture.fontId}`, { body: Buffer.from(report.frame.split(',')[1]!, 'base64'), contentType: 'image/png' });
+  }
+  diagnostics.verify();
+});
+
 test('scrolls every phrase of a long final composition from top to bottom before the photo handoff', async ({ page }, testInfo) => {
   const diagnostics = await openStudio(page);
   const fixtures = [
@@ -2775,7 +2812,7 @@ test('imports uncropped final images, animates them from depth, and preserves th
   const recolored = await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec);
   expect(recolored.finalImages).toEqual(remixed.finalImages);
   await page.locator('[data-locale="fr"]').click();
-  await expect(page.locator('.image-film-button')).toHaveAccessibleName('Ajouter des images finales');
+  await expect(page.locator('.image-film-button')).toHaveAccessibleName('Ajouter des photos, GIF ou vidéos');
   expect(await page.evaluate(() => (window as unknown as DebugWindow).__CREACTORS_DEV__.spec)).toEqual(recolored);
   diagnostics.verify();
 });

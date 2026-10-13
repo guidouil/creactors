@@ -6,7 +6,7 @@ import { evaluateScene } from '../src/scene/evaluator';
 import { withFinalImages } from '../src/scene/final-image';
 import type { SceneSpec, Vec3 } from '../src/scene/types';
 import { TextDirector } from '../src/text/director';
-import { measureGroups } from '../src/typography/measure';
+import { measureGroups, type MeasuredGroup } from '../src/typography/measure';
 
 const phrases: readonly [SecretFilmId, string, string][] = [
   ['gravity', 'La gravité est une suggestion.', 'Gravity is a suggestion.'],
@@ -17,9 +17,9 @@ const phrases: readonly [SecretFilmId, string, string][] = [
   ['seventh-face', 'Même le hasard cache quelque chose.', 'Even chance is hiding something.'],
 ];
 
-function undecorated(text: string, seed = 1) {
+function undecorated(text: string, seed = 1, measurementOverrides: Partial<MeasuredGroup> = {}) {
   const analysis = TextDirector.analyze(text);
-  const measured = measureGroups(analysis);
+  const measured = measureGroups(analysis).map(group => ({ ...group, ...measurementOverrides }));
   // The public director decorates secret phrases. Retain the same measured
   // words while bypassing recognition to inspect the underlying choreography.
   const ordinaryAnalysis = { ...analysis, sourceText: 'An ordinary production.' };
@@ -153,7 +153,9 @@ describe('hidden exportable films', () => {
     'Il y a un monde derrière les lettres.', 'Une petite phrase peut devenir une supernova.', 'Words always come back.',
   ])('finishes the complete final scan before its secret gesture and photographs: %s', text => {
     for (const seed of [1, 11, 77]) {
-      const { spec: base } = undecorated(text, seed);
+      // The ordinary font fits these short phrases. Simulate a tall text block
+      // whose small capitals would become unreadable if the full stack shrank.
+      const { spec: base } = undecorated(text, seed, { width: 3, height: 8, inkHeight: 8, portal: null });
       const secret = applySecretFilm(base);
       const scroll = secret.cameraTracks.find(track => track.id === 'poster-scroll')!;
       const end = secret.cameraTracks.find(track => track.id === 'poster-end')!;
@@ -168,6 +170,19 @@ describe('hidden exportable films', () => {
       expect(extended.finalImages![0]!.entrance.start).toBeGreaterThan(end.end);
       expect(evaluateScene(extended, (scroll.start + scroll.end) / 2).finalImages![0]!.visible).toBe(false);
       expect(withFinalImages(extended, [])).toEqual(secret);
+    }
+  });
+
+  it.each(phrases)('keeps ordinary %s phrases in a static final poster', (_id, fr, en) => {
+    for (const text of [fr, en]) for (const seed of [1, 11, 77]) {
+      const secret = applySecretFilm(undecorated(text, seed).spec);
+      expect(secret.cameraTracks.some(track => track.id === 'poster-scroll' || track.id === 'poster-end')).toBe(false);
+      const poster = secret.cameraTracks.find(track => track.id === 'poster')!;
+      const first = evaluateScene(secret, poster.start);
+      const last = evaluateScene(secret, poster.end - 1e-7);
+      expect(last.objects).toEqual(first.objects);
+      expect(last.camera).toEqual(first.camera);
+      for (const object of secret.objects) expect(object.exit!.start).toBeGreaterThanOrEqual(poster.end);
     }
   });
 

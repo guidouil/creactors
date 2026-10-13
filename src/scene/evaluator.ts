@@ -159,6 +159,38 @@ export function evaluateScene(spec: SceneSpec, requestedTime: number): Evaluated
   if (!Number.isFinite(requestedTime)) throw new RangeError('Scene time must be finite.');
   if (spec.cameraTracks.length === 0) throw new RangeError('A scene needs at least one camera track.');
   const time = Math.max(0, Math.min(spec.duration, requestedTime));
+  const sequence = spec.mediaSequence;
+  if (sequence?.placement === 'before') {
+    // Evaluate the saved choreography in its own time coordinates. This retains
+    // focused-camera offsets, impacts and barrel rolls exactly after the handoff.
+    const { finalImages: _images, mediaSequence: _sequence, ...undecorated } = spec;
+    const base: SceneSpec = { ...undecorated, ...sequence.base };
+    const textStarted = time >= sequence.textOffset;
+    let textTime = textStarted ? time - sequence.textOffset : 0;
+    // Adding then removing a fractional offset can land one floating-point bit
+    // before an exact camera cut. Restore those authored boundary instants.
+    const tolerance = Number.EPSILON * Math.max(1, time, sequence.textOffset) * 4;
+    for (const track of base.cameraTracks) {
+      const boundary = [track.start, track.end].find(value => Math.abs(value - textTime) <= tolerance);
+      if (boundary !== undefined) {
+        textTime = boundary;
+        break;
+      }
+    }
+    const state = evaluateScene(base, time === spec.duration ? base.duration : textTime);
+    return {
+      ...state,
+      time,
+      trackId: textStarted ? state.trackId : spec.cameraTracks[0]!.id,
+      objects: textStarted ? state.objects : state.objects.map(object => ({ ...object, scale: 0 })),
+      ...(spec.finalImages?.length ? {
+        finalImages: spec.finalImages.map(image => ({
+          ...objectTransform(image, time),
+          visible: time >= image.visibleInterval[0] && time < image.visibleInterval[1],
+        })),
+      } : {}),
+    };
+  }
   // Start-inclusive/end-exclusive intervals ensure a cut happens on its exact frame.
   const track = spec.cameraTracks.find((candidate) => time >= candidate.start && time < candidate.end)
     ?? spec.cameraTracks[spec.cameraTracks.length - 1];

@@ -4,19 +4,21 @@ import { evaluateScene } from './evaluator';
 import type { FinalImageObject, SceneSpec } from './types';
 import { getTheme } from '../themes';
 import { imageFrameIndex } from '../image/animation';
+import { prepareVideoFrames } from '../image/video';
 
 interface PreparedImage {
   root: Group;
   bounds: Box3;
   texture: Texture;
   updateFrame(time: number): void;
+  updateFrameAsync?(time: number, isCurrent: () => boolean): Promise<void>;
   dispose(): void;
 }
 
 async function prepareImage(object: FinalImageObject): Promise<PreparedImage> {
   const frames: HTMLImageElement[] = [];
   try {
-    for (const source of object.asset.animation?.frames.map(frame => frame.source) ?? [object.asset.source]) {
+    for (const source of object.asset.video ? [object.asset.source] : object.asset.animation?.frames.map(frame => frame.source) ?? [object.asset.source]) {
       const image = new Image();
       frames.push(image);
       image.src = source;
@@ -27,12 +29,19 @@ async function prepareImage(object: FinalImageObject): Promise<PreparedImage> {
     throw error;
   }
   // One GPU texture per animation: its bounded, composed frames share a canvas.
-  const canvas = object.asset.animation ? document.createElement('canvas') : null;
+  const canvas = object.asset.animation || object.asset.video ? document.createElement('canvas') : null;
   if (canvas) { canvas.width = object.asset.width; canvas.height = object.asset.height; }
   const context = canvas?.getContext('2d') ?? null;
   if (canvas && !context) {
     frames.forEach(image => { image.src = ''; });
     throw new Error('The animated final image could not be prepared.');
+  }
+  let video: Awaited<ReturnType<typeof prepareVideoFrames>> | undefined;
+  try { if (object.asset.video) video = await prepareVideoFrames(object.asset); }
+  catch (error) {
+    frames.forEach(image => { image.src = ''; });
+    if (canvas) canvas.width = canvas.height = 0;
+    throw error;
   }
   let currentFrame = 0;
   context?.drawImage(frames[0]!, 0, 0);
@@ -51,7 +60,7 @@ async function prepareImage(object: FinalImageObject): Promise<PreparedImage> {
     texture,
     bounds: new Box3(new Vector3(-object.width / 2, -object.height / 2, 0), new Vector3(object.width / 2, object.height / 2, 0)),
     updateFrame(time) {
-      if (!context || !canvas) return;
+      if (!context || !canvas || video) return;
       const nextFrame = imageFrameIndex(object.asset, time - object.entrance.end);
       if (nextFrame === currentFrame) return;
       currentFrame = nextFrame;
@@ -59,7 +68,13 @@ async function prepareImage(object: FinalImageObject): Promise<PreparedImage> {
       context.drawImage(frames[nextFrame]!, 0, 0);
       texture.needsUpdate = true;
     },
+    ...(video && context ? {
+      async updateFrameAsync(time: number, isCurrent: () => boolean) {
+        if (await video.drawFrame(time - object.entrance.end, context, isCurrent)) texture.needsUpdate = true;
+      },
+    } : {}),
     dispose() {
+      video?.dispose();
       texture.dispose(); geometry.dispose(); material.dispose();
       frames.forEach(image => { image.src = ''; });
       if (canvas) canvas.width = canvas.height = 0;
@@ -78,6 +93,13 @@ export class SceneRenderer {
   private preparationGeneration = 0;
   private latestPreparation: Promise<void> | null = null;
   private disposed = false;
+  private frameGeneration = 0;
+  private previewEpoch = 0;
+  private requestedPreviewFrame: { time: number; generation: number } | null = null;
+  private previewMediaTask: Promise<void> | null = null;
+  private mediaError: unknown;
+  /** Decoding failures belong to the same user-visible recovery flow as renderer failures. */
+  onMediaError?: (error: unknown) => void;
   frameTime = 0;
   lastTime = 0;
 
@@ -143,6 +165,73 @@ export class SceneRenderer {
 
   renderFrame(time: number): void {
     if (!this.spec) return;
+    ++this.frameGeneration;
+    // A decoded playback sample may trail the animation clock by a frame. Keep
+    // it useful during forward playback, but never across a seek/canvas change.
+    if (time < this.lastTime - 1e-9 || time - this.lastTime > 0.25) ++this.previewEpoch;
+    this.paintFrame(time);
+    if (!this.hasVisibleVideo(time)) return;
+    this.requestedPreviewFrame = { time, generation: this.previewEpoch };
+    this.startPreviewMediaTask();
+  }
+
+  private startPreviewMediaTask(): void {
+    if (this.previewMediaTask) return;
+    const preparation = this.preparationGeneration;
+    const task = this.preparePreviewFrames(preparation);
+    this.previewMediaTask = task;
+    void task.finally(() => {
+      if (this.previewMediaTask !== task) return;
+      this.previewMediaTask = null;
+      if (this.requestedPreviewFrame && !this.disposed) this.startPreviewMediaTask();
+    });
+  }
+
+  /** Resolve local video samples before export captures this exact scene timestamp. */
+  async renderFrameAsync(time: number): Promise<void> {
+    if (!this.spec) return;
+    const generation = ++this.frameGeneration;
+    ++this.previewEpoch;
+    const preparation = this.preparationGeneration;
+    this.requestedPreviewFrame = null;
+    await this.previewMediaTask;
+    if (this.mediaError) throw this.mediaError;
+    const isCurrent = () => !this.disposed && preparation === this.preparationGeneration && generation === this.frameGeneration;
+    await this.updateVideoFrames(time, isCurrent);
+    if (isCurrent()) this.paintFrame(time);
+  }
+
+  private hasVisibleVideo(time: number): boolean {
+    return this.spec?.finalImages?.some(image => image.asset.video && time >= image.visibleInterval[0] && time < image.visibleInterval[1]) ?? false;
+  }
+
+  private async updateVideoFrames(time: number, isCurrent: () => boolean): Promise<void> {
+    if (!this.spec) return;
+    for (const image of evaluateScene(this.spec, time).finalImages ?? []) {
+      if (!image.visible || image.scale <= 0 || !isCurrent()) continue;
+      await this.preparedImages.get(image.id)?.updateFrameAsync?.(time, isCurrent);
+    }
+  }
+
+  private async preparePreviewFrames(preparation: number): Promise<void> {
+    try {
+      while (this.requestedPreviewFrame && preparation === this.preparationGeneration && !this.disposed) {
+        const request = this.requestedPreviewFrame;
+        this.requestedPreviewFrame = null;
+        const isCurrent = () => preparation === this.preparationGeneration && request.generation === this.previewEpoch && !this.disposed;
+        await this.updateVideoFrames(request.time, isCurrent);
+        if (isCurrent()) this.paintFrame(this.lastTime);
+      }
+    } catch (error) {
+      if (preparation !== this.preparationGeneration || this.disposed) return;
+      this.mediaError = error;
+      this.requestedPreviewFrame = null;
+      this.onMediaError?.(error);
+    }
+  }
+
+  private paintFrame(time: number): void {
+    if (!this.spec) return;
     const start = performance.now();
     const state = evaluateScene(this.spec, time);
     this.camera.position.fromArray(state.camera.position);
@@ -170,6 +259,7 @@ export class SceneRenderer {
   }
 
   resize(width = 540, height = 960): void {
+    ++this.previewEpoch;
     this.pixels = [width, height];
     this.renderer.setSize(width, height, false);
     this.renderFrame(this.lastTime);
@@ -209,6 +299,10 @@ export class SceneRenderer {
   }
 
   private clear(): void {
+    ++this.frameGeneration;
+    ++this.previewEpoch;
+    this.requestedPreviewFrame = null;
+    this.mediaError = undefined;
     for (const item of this.prepared.values()) { this.world.remove(item.root); item.dispose(); }
     this.prepared.clear();
     for (const item of this.preparedImages.values()) { this.world.remove(item.root); item.dispose(); }

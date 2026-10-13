@@ -1,7 +1,7 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
-import { MAX_IMAGE_COUNT, type ImageAsset } from '../image/types';
+import { MAX_IMAGE_COUNT, type ImageAsset, type MediaPlacement } from '../image/types';
 import { evaluateScene } from './evaluator';
-import type { CameraPose, FinalImageObject, SceneSpec, Vec3 } from './types';
+import type { CameraPose, FinalImageObject, SceneObject, SceneSpec, Vec3 } from './types';
 
 export const MAX_FINAL_IMAGES = MAX_IMAGE_COUNT;
 export const FINAL_IMAGE_TIMING = Object.freeze({ entrance: 0.7, hold: 0.45, exit: 0.6, blank: 0.15 });
@@ -21,12 +21,12 @@ export function finalImagesDuration(count: number): number {
   return count === 0 ? 0 : FINAL_IMAGE_DURATION + (count - 1) * FINAL_IMAGE_STRIDE;
 }
 
-/** The complete quotation must remain intact when adding an optional ending. */
+/** The complete quotation must remain intact when adding optional media. */
 export class FinalImageDurationError extends Error {
   readonly duration: number;
 
   constructor(duration: number) {
-    super('The complete film with its final image would exceed 60 seconds.');
+    super('The complete film with its media would exceed 60 seconds.');
     this.name = 'FinalImageDurationError';
     this.duration = duration;
   }
@@ -42,25 +42,38 @@ function frozenPose(position: Vec3, quaternion: Quaternion): CameraPose {
 }
 
 /**
- * Append a physical image arrival, readable hold, then a rush through the lens.
+ * Place media before or after the original text choreography.
  * The base scene remains untouched and removal/replacement never grows timing.
  */
-export function withFinalImages(spec: SceneSpec, assets: readonly ImageAsset[]): SceneSpec {
-  const { finalImages: previous, ...undecorated } = spec;
+export function withFinalImages(spec: SceneSpec, assets: readonly ImageAsset[], placement: MediaPlacement = 'after'): SceneSpec {
+  if (placement !== 'before' && placement !== 'after') throw new RangeError('Media must be placed before or after text.');
+  const { finalImages: previous, mediaSequence, ...undecorated } = spec;
   const original = previous?.[0];
   const previousIds = new Set(previous?.map(image => image.id));
-  const base: SceneSpec = original ? {
+  const base: SceneSpec = mediaSequence ? { ...undecorated, ...mediaSequence.base } : original ? {
     ...undecorated,
     duration: original.baseDuration,
     posterTime: original.basePosterTime,
     cameraTracks: spec.cameraTracks.filter(track => track.id !== IMAGE_CAMERA_TRACK),
     chapters: spec.chapters.filter(chapter => !chapter.objectId || !previousIds.has(chapter.objectId)),
   } : undecorated;
-  if (!assets.length) return original ? base : spec;
+  if (!assets.length) return original || mediaSequence ? base : spec;
   if (assets.length > MAX_FINAL_IMAGES) throw new RangeError('A film supports up to five final images.');
   if (assets.some(asset => !Number.isFinite(asset.width) || !Number.isFinite(asset.height) || asset.width <= 0 || asset.height <= 0)) {
     throw new RangeError('A final image needs positive finite dimensions.');
   }
+  const holds = assets.map(asset => {
+    const animation = asset.animation;
+    if (animation && (!Number.isFinite(animation.duration) || animation.duration <= 0 || !animation.frames.length)) {
+      throw new RangeError('An animated final image needs a positive duration and frames.');
+    }
+    const video = asset.video;
+    if (video && (!Number.isFinite(video.duration) || video.duration <= 0 || !video.source)) {
+      throw new RangeError('A video needs a positive finite duration and source.');
+    }
+    return Math.max(FINAL_IMAGE_TIMING.hold, animation?.duration ?? 0, video?.duration ?? 0);
+  });
+  if (placement === 'before') return withOpeningMedia(base, assets, holds);
 
   // Recognize the real ending from object motion, rather than generator-specific
   // camera IDs. The poster and all phrase-reading intervals finish before the
@@ -83,13 +96,6 @@ export function withFinalImages(spec: SceneSpec, assets: readonly ImageAsset[]):
   const firstEntranceEnd = firstStart + firstEntranceDuration;
   // The entire first hold must survive the text exit. The minimum also keeps
   // custom scene camera tracks intact instead of shortening the original film.
-  const holds = assets.map(asset => {
-    const animation = asset.animation;
-    if (animation && (!Number.isFinite(animation.duration) || animation.duration <= 0 || !animation.frames.length)) {
-      throw new RangeError('An animated final image needs a positive duration and frames.');
-    }
-    return Math.max(FINAL_IMAGE_TIMING.hold, animation?.duration ?? 0);
-  });
   const firstExitStart = Math.max(firstEntranceEnd, textExitEnd, base.duration - FINAL_IMAGE_TIMING.blank)
     + holds[0]!;
   const duration = firstExitStart + holds.slice(1).reduce((sum, hold) => sum + FINAL_IMAGE_TIMING.entrance + hold, 0)
@@ -141,5 +147,88 @@ export function withFinalImages(spec: SceneSpec, assets: readonly ImageAsset[]):
       { time: image.entrance.end, objectId: image.id, primitive: 'HOLD' as const },
       { time: image.exit.start, objectId: image.id, primitive: 'DEPTH' as const },
     ])].sort((a, b) => a.time - b.time),
+  };
+}
+
+function shiftMotion<T extends { start: number; end: number }>(motion: T, offset: number): T {
+  return { ...motion, start: motion.start + offset, end: motion.end + offset };
+}
+
+/** Shift only absolute times; every authored spatial gesture remains intact. */
+function shiftObject(object: SceneObject, offset: number): SceneObject {
+  return {
+    ...object,
+    readingInterval: [object.readingInterval[0] + offset, object.readingInterval[1] + offset],
+    ...(object.entrance ? { entrance: shiftMotion(object.entrance, offset) } : {}),
+    ...(object.assembly ? { assembly: shiftMotion(object.assembly, offset) } : {}),
+    ...(object.exit ? { exit: shiftMotion(object.exit, offset) } : {}),
+    ...(object.impact ? { impact: shiftMotion(object.impact, offset) } : {}),
+  };
+}
+
+/** Media finishes with a blank handoff into the original opening camera shot. */
+function withOpeningMedia(base: SceneSpec, assets: readonly ImageAsset[], holds: readonly number[]): SceneSpec {
+  const textOffset = holds.reduce((sum, hold) => sum + FINAL_IMAGE_TIMING.entrance + hold, 0)
+    + FINAL_IMAGE_TIMING.exit + FINAL_IMAGE_TIMING.blank;
+  const duration = base.duration + textOffset;
+  if (duration > 60) throw new FinalImageDurationError(duration);
+
+  const state = evaluateScene(base, 0);
+  const quaternion = new Quaternion(...state.camera.quaternion);
+  const cameraPosition = new Vector3(...state.camera.position);
+  const cameraSpace = (distance: number): Vec3 =>
+    new Vector3(0, 0, -distance).applyQuaternion(quaternion).add(cameraPosition).toArray() as Vec3;
+  const distance = 9;
+  const frustumHeight = 2 * distance * Math.tan(base.fov * Math.PI / 360);
+  const maxWidth = frustumHeight * base.aspect * 0.82;
+  const maxHeight = frustumHeight * 0.64;
+  const rotation = new Euler().setFromQuaternion(quaternion, 'XYZ').toArray().slice(0, 3) as unknown as Vec3;
+  const pose = frozenPose(state.camera.position, quaternion);
+  let nextStart = 0;
+  const images: FinalImageObject[] = assets.map((asset, index) => {
+    const aspect = asset.width / asset.height;
+    const width = Math.min(maxWidth, maxHeight * aspect);
+    const start = nextStart;
+    const entranceEnd = start + FINAL_IMAGE_TIMING.entrance;
+    const exitStart = entranceEnd + holds[index]!;
+    const exitEnd = exitStart + FINAL_IMAGE_TIMING.exit;
+    nextStart = exitStart;
+    return {
+      id: `final-image-${index}`, asset, baseDuration: base.duration, basePosterTime: base.posterTime,
+      width, height: width / aspect, position: cameraSpace(distance), rotation, scale: 1,
+      entrance: { start, end: entranceEnd, from: cameraSpace(96), scale: 0, easing: 'cinematic' },
+      exit: { start: exitStart, end: exitEnd, to: cameraSpace(-5), easing: 'accelerate' },
+      visibleInterval: [start, exitEnd],
+    };
+  });
+
+  return {
+    ...base,
+    duration,
+    ...(base.posterTime === undefined ? {} : { posterTime: base.posterTime + textOffset }),
+    objects: base.objects.map(object => shiftObject(object, textOffset)),
+    cameraTracks: [{
+      id: IMAGE_CAMERA_TRACK, start: 0, end: textOffset, primitive: 'HOLD', from: pose, to: pose, easing: 'linear',
+    }, ...base.cameraTracks.map(track => ({
+      ...shiftMotion(track, textOffset),
+      ...(track.impact ? { impact: shiftMotion(track.impact, textOffset) } : {}),
+    }))],
+    chapters: [
+      ...images.flatMap(image => [
+        { time: image.entrance.start, objectId: image.id, primitive: 'DEPTH' as const },
+        { time: image.entrance.end, objectId: image.id, primitive: 'HOLD' as const },
+        { time: image.exit.start, objectId: image.id, primitive: 'DEPTH' as const },
+      ]),
+      ...base.chapters.map(chapter => ({ ...chapter, time: chapter.time + textOffset })),
+    ].sort((a, b) => a.time - b.time),
+    finalImages: images,
+    mediaSequence: {
+      placement: 'before', textOffset,
+      base: {
+        duration: base.duration,
+        ...(base.posterTime === undefined ? {} : { posterTime: base.posterTime }),
+        objects: base.objects, cameraTracks: base.cameraTracks, chapters: base.chapters,
+      },
+    },
   };
 }

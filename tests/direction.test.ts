@@ -5,6 +5,7 @@ import { FUTURE_QUOTE, futureDemo } from '../src/demos/future';
 import { evaluateScene } from '../src/scene/evaluator';
 import type { SceneSpec } from '../src/scene/types';
 import { TextDirector } from '../src/text/director';
+import { DEFAULT_FONT_ID } from '../src/typography/fonts';
 import { measureGroups, measureLine, type MeasuredGroup } from '../src/typography/measure';
 
 const corpus = [
@@ -17,9 +18,9 @@ const corpus = [
   'What if everything started now?', 'Less noise. More meaning.', 'Make your words impossible to ignore.',
 ];
 
-function direct(text: string, seed = 1, previousSignature?: string | readonly string[]) {
+function direct(text: string, seed = 1, previousSignature?: string | readonly string[], fontId = DEFAULT_FONT_ID) {
   const analysis = TextDirector.analyze(text);
-  const measured = measureGroups(analysis);
+  const measured = measureGroups(analysis, fontId);
   return { spec: MotionDirector.direct(analysis, measured, 'califormandy-sunset', seed, previousSignature), analysis, measured };
 }
 
@@ -29,6 +30,21 @@ function posterReadingTime(spec: SceneSpec, index: number): number {
   const y = spec.objects[index]!.assembly!.position[1];
   const progress = Math.max(0, Math.min(1, (scroll.from.position[1] - y) / (scroll.from.position[1] - scroll.to.position[1])));
   return scroll.start + (scroll.end - scroll.start) * progress;
+}
+
+function minimumPosterCapPixels(spec: SceneSpec, measured: readonly MeasuredGroup[]): number {
+  const state = evaluateScene(spec, spec.posterTime!);
+  const camera = new PerspectiveCamera(spec.fov, spec.aspect, 0.05, 180);
+  camera.position.fromArray(state.camera.position);
+  camera.quaternion.fromArray(state.camera.quaternion);
+  camera.updateMatrixWorld();
+  return Math.min(...spec.objects.map((object, index) => {
+    const placement = state.objects[index]!;
+    const capHeight = measured[index]!.capHeight * object.fontSize * placement.scale;
+    const bottom = new Vector3(...placement.position).project(camera);
+    const top = new Vector3(placement.position[0], placement.position[1] + capHeight, placement.position[2]).project(camera);
+    return (top.y - bottom.y) * 640 / 2;
+  }));
 }
 
 function expectReadablePosterGroup(spec: SceneSpec, measured: readonly MeasuredGroup[], index: number): void {
@@ -41,16 +57,18 @@ function expectReadablePosterGroup(spec: SceneSpec, measured: readonly MeasuredG
   camera.quaternion.fromArray(state.camera.quaternion);
   camera.updateMatrixWorld();
   const opticalSize = object.fontSize * placement.scale;
+  const renderedWidth = (measurement.width + (object.extruded ? 0.016 : 0)) * opticalSize;
+  const renderedHeight = (object.extruded ? measurement.inkHeight + 0.016 : measurement.height) * opticalSize;
   const label = `${spec.sourceText} seed ${spec.seed} ${object.id}`;
   // Evaluate every phrase when the pan reaches it, using real projection rather
   // than accepting an assembled object that is permanently outside the frame.
   for (const x of [-1, 1]) for (const y of [-1, 1]) {
-    const point = new Vector3(x * measurement.width * opticalSize / 2, y * measurement.inkHeight * opticalSize / 2, 0)
+    const point = new Vector3(x * renderedWidth / 2, y * renderedHeight / 2, 0)
       .add(new Vector3(...placement.position)).project(camera);
     expect(point.x, label).toBeGreaterThanOrEqual(-0.84);
     expect(point.x, label).toBeLessThanOrEqual(0.84);
-    expect(point.y, label).toBeGreaterThanOrEqual(-0.64);
-    expect(point.y, label).toBeLessThanOrEqual(0.76);
+    expect(point.y, label).toBeGreaterThanOrEqual(-0.64 - 1e-9);
+    expect(point.y, label).toBeLessThanOrEqual(0.76 + 1e-9);
     expect(point.z, label).toBeGreaterThan(-1);
     expect(point.z, label).toBeLessThan(1);
   }
@@ -183,20 +201,46 @@ describe('measured typography and procedural direction', () => {
     }
   });
 
+  it('holds ordinary French and English quotations still when the complete poster fits at readable size', () => {
+    const change = 'Change starts with us. We build it together. Every day matters.';
+    const fixtures = [
+      { text: FUTURE_QUOTE, fontId: 'bungee' },
+      { text: FUTURE_QUOTE, fontId: 'montserrat-bold' },
+      { text: 'The future is not what awaits us. It is what we create.', fontId: 'bungee' },
+      { text: change, fontId: 'montserrat-bold' },
+      { text: change, fontId: 'black-ops-one' },
+    ];
+    for (const { text, fontId } of fixtures) for (const seed of [1, 7, 11, 77]) {
+      const { spec, measured } = direct(text, seed, undefined, fontId);
+      const label = `${fontId}: ${text} seed ${seed}`;
+      expect(spec.objects, label).toHaveLength(5);
+      expect(spec.cameraTracks.some(track => track.id === 'poster-scroll'), label).toBe(false);
+      expect(spec.cameraTracks.some(track => track.id === 'poster-end'), label).toBe(false);
+      for (let index = 0; index < spec.objects.length; index++) expectReadablePosterGroup(spec, measured, index);
+      const poster = spec.cameraTracks.find(track => track.id === 'poster')!;
+      expect(poster.end - poster.start, label).toBeCloseTo(0.6, 7);
+      const settled = evaluateScene(spec, poster.start + 1e-6);
+      expect(evaluateScene(spec, poster.end - 1e-6).camera, label).toEqual(settled.camera);
+      expect(evaluateScene(spec, poster.end - 1e-6).objects, label).toEqual(settled.objects);
+    }
+  });
+
   it('chooses final scrolling from measured geometry instead of a fixed number of text steps', () => {
     const measuredSpec = (text: string, inkHeight: number) => {
       const analysis = TextDirector.analyze(text);
-      const measured = measureGroups(analysis).map(group => ({ ...group, width: 3, height: 2, inkHeight, portal: null }));
+      const measured = measureGroups(analysis).map(group => ({ ...group, width: 3, height: Math.max(2, inkHeight + 0.2), inkHeight, portal: null }));
       return MotionDirector.direct(analysis, measured, 'califormandy-sunset', 1);
     };
     const compact = measuredSpec('A. B. C. D. E. F.', 0.05);
     const short = measuredSpec('A. B. C. D.', 0.05);
-    const tall = measuredSpec('A. B. C. D.', 2);
-    const taller = measuredSpec('A. B. C. D.', 3);
+    const medium = measuredSpec('A. B. C. D.', 2);
+    const tall = measuredSpec('A. B. C. D.', 4);
+    const taller = measuredSpec('A. B. C. D.', 6);
     expect(compact.objects).toHaveLength(6);
     expect(tall.objects).toHaveLength(4);
     expect(compact.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(false);
     expect(compact.cameraTracks.some(track => track.id === 'poster-end')).toBe(false);
+    expect(medium.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(false);
     expect(tall.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(true);
     expect(tall.cameraTracks.some(track => track.id === 'poster-end')).toBe(true);
     const scrollDuration = (spec: SceneSpec) => {
@@ -205,6 +249,30 @@ describe('measured typography and procedural direction', () => {
     };
     expect(scrollDuration(taller)).toBeGreaterThan(scrollDuration(tall));
     expect(tall.duration - short.duration).toBeCloseTo(scrollDuration(tall) + 0.6, 7);
+  });
+
+  it('starts scrolling only when fitting the complete stack would make capitals smaller than 24 phone pixels', () => {
+    const analysis = TextDirector.analyze('A. B. C. D.');
+    const referenceMeasured = measureGroups(analysis).map(group => ({ ...group, width: 3, height: 2.8, inkHeight: 2.7, portal: null }));
+    const reference = MotionDirector.direct(analysis, referenceMeasured, 'califormandy-sunset', 1);
+    expect(reference.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(false);
+    const referenceCapPixels = minimumPosterCapPixels(reference, referenceMeasured);
+    expect(referenceCapPixels).toBeGreaterThan(24.1);
+    const atCapPixels = (pixels: number) => {
+      const measured = referenceMeasured.map(group => ({ ...group, capHeight: group.capHeight * pixels / referenceCapPixels }));
+      return { measured, spec: MotionDirector.direct(analysis, measured, 'califormandy-sunset', 1) };
+    };
+    const fits = atCapPixels(24.1);
+    const tooSmall = atCapPixels(23.9);
+    expect(fits.spec.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(false);
+    expect(minimumPosterCapPixels(fits.spec, fits.measured)).toBeCloseTo(24.1, 7);
+    // Project the smaller capitals at the same complete-stack framing: the
+    // lettering would fall below the limit even though all groups would fit.
+    expect(minimumPosterCapPixels(reference, tooSmall.measured)).toBeCloseTo(23.9, 7);
+    expect(tooSmall.spec.cameraTracks.some(track => track.id === 'poster-scroll')).toBe(true);
+    for (const { spec, measured } of [fits, tooSmall]) {
+      for (let index = 0; index < spec.objects.length; index++) expectReadablePosterGroup(spec, measured, index);
+    }
   });
 
   it('scrolls the complete long final composition downwards before any word departs', () => {
