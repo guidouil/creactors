@@ -28,10 +28,10 @@ describe('adaptive color families', () => {
     }
   });
 
-  it('retains the original sunset and safely resolves unknown families', () => {
-    expect(getTheme('califormandy-sunset').background).toBe('#111126');
+  it('uses the Califormandy identity and safely resolves unknown families', () => {
+    expect(getTheme('califormandy-sunset').background).toBe('#20211F');
     expect(getTheme('califormandy-sunset').colors).toEqual({
-      white: '#EDE8FA', pink: '#F58BB4', coral: '#FFB58A', cyan: '#77D7F5', violet: '#EDE8FA',
+      white: '#F5F2E9', pink: '#FB398F', coral: '#D4EF53', cyan: '#35DFFF', violet: '#F5F2E9',
     });
     expect(getTheme('unknown')).toBe(getTheme('califormandy-sunset'));
     expect(getThemeFamilyId('unknown-light')).toBe('califormandy-sunset');

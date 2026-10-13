@@ -21,7 +21,7 @@ export interface ThemeFamily {
 }
 
 export const themeFamilies: readonly ThemeFamily[] = [
-  { id: 'califormandy-sunset', labelKey: 'themeSunset', swatch: '#F58BB4', lightSwatch: '#9B2458' },
+  { id: 'califormandy-sunset', labelKey: 'themeSunset', swatch: sunset.pink, lightSwatch: '#C01E69' },
   { id: 'monochrome', labelKey: 'themeMonochrome', swatch: '#FAF8FF', lightSwatch: '#1B1B21' },
   { id: 'coral-night', labelKey: 'themeCoral', swatch: '#FFB58A', lightSwatch: '#993B26' },
   { id: 'cobalt', labelKey: 'themeCobalt', swatch: '#A7BEFF', lightSwatch: '#354CA1' },
@@ -33,8 +33,8 @@ export const themeFamilies: readonly ThemeFamily[] = [
 // therefore use dark inks for the same roles without changing the choreography.
 export const themes: readonly Theme[] = [
   { id: 'califormandy-sunset', background: sunset.background,
-    colors: { white: sunset.white, pink: sunset.pink, coral: sunset.coral, cyan: sunset.cyan, violet: sunset.white },
-    sides: { white: '#78738A', pink: '#8E466E', coral: '#AA7155', cyan: '#35738F', violet: '#78738A' } },
+    colors: { white: sunset.white, pink: sunset.pink, coral: sunset.coral, cyan: sunset.cyan, violet: sunset.violet },
+    sides: { white: '#79786F', pink: '#A32660', coral: '#7B8E30', cyan: '#1E7D91', violet: '#79786F' } },
   { id: 'monochrome', background: '#101014',
     colors: { white: '#FAF8FF', pink: '#FAF8FF', coral: '#D1CDD9', cyan: '#FAF8FF', violet: '#D1CDD9' },
     sides: { white: '#77747E', pink: '#77747E', coral: '#77747E', cyan: '#77747E', violet: '#77747E' } },
@@ -50,9 +50,10 @@ export const themes: readonly Theme[] = [
   { id: 'acid', background: '#152016',
     colors: { white: '#F4F8E3', pink: '#E3F58B', coral: '#FFD68D', cyan: '#C8F269', violet: '#A7E4C0' },
     sides: { white: '#788364', pink: '#7F8C3C', coral: '#92733A', cyan: '#678E30', violet: '#47765C' } },
-  { id: 'califormandy-sunset-light', background: '#F9EFEA',
-    colors: { white: '#242038', pink: '#9B2458', coral: '#9C3E14', cyan: '#126582', violet: '#54416A' },
-    sides: { white: '#8F879D', pink: '#D58CA8', coral: '#D59872', cyan: '#78ACBB', violet: '#AA93B8' } },
+  // Deeper accents preserve Califormandy's hues on its cream paper background.
+  { id: 'califormandy-sunset-light', background: sunset.white,
+    colors: { white: sunset.background, pink: '#C01E69', coral: '#59650E', cyan: '#006A80', violet: '#62635D' },
+    sides: { white: '#8E8F84', pink: '#D78DAF', coral: '#AEBE60', cyan: '#69AEC0', violet: '#A1A39A' } },
   { id: 'monochrome-light', background: '#F5F3EF',
     colors: { white: '#1B1B21', pink: '#1B1B21', coral: '#56535D', cyan: '#1B1B21', violet: '#56535D' },
     sides: { white: '#939099', pink: '#939099', coral: '#AAA6B0', cyan: '#939099', violet: '#AAA6B0' } },

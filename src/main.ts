@@ -12,8 +12,10 @@ import { MotionDirector, TooLongTextError, nextRemixSeed, sceneSignature, stable
 import { SceneRenderer } from './scene/renderer';
 import { evaluateScene } from './scene/evaluator';
 import type { SceneSpec } from './scene/types';
+import { filmFormat, previewSize, type FilmFormat } from './scene/format';
 import { VideoExporter, ExportCapabilityError, ExportResourceError, AudioExportCapabilityError, isExportAvailable } from './export/video-exporter';
-import { videoFilename } from './export/filename';
+import { exportFilename } from './export/filename';
+import { GifExporter, GifExportSizeError } from './export/gif-exporter';
 import { chooseTheme, resolveTheme, type ColorScheme } from './themes';
 import { AudioPlayer, AudioImportError, MAX_AUDIO_DURATION, MAX_AUDIO_FILE_BYTES } from './audio/player';
 import type { AudioTrack } from './audio/types';
@@ -225,6 +227,7 @@ function syncAudio() {
 }
 
 function syncFilm(preserveEditing = false) {
+  shell.setFormat(filmFormat(spec.aspect));
   shell.setFilm({ text: spec.sourceText, language: spec.inputLanguage, duration: spec.duration, seed: spec.seed, themeId, fontId: spec.fontId ?? DEFAULT_FONT_ID, secretFilm: spec.secretFilm }, preserveEditing);
 }
 
@@ -313,7 +316,7 @@ async function boot() {
 const ready = boot();
 ready.catch(failRenderer);
 
-async function generate(text: string, language: InputLanguage, seed = stableSeed(text), previousSignature?: string | readonly string[], themeMode: 'seeded' | 'vary' | 'preserve' = 'seeded', fontId = shell.getInput().fontId): Promise<void> {
+async function generate(text: string, language: InputLanguage, seed = stableSeed(text), previousSignature?: string | readonly string[], themeMode: 'seeded' | 'vary' | 'preserve' = 'seeded', fontId = shell.getInput().fontId, format = shell.getFormat()): Promise<void> {
   if (busy) return;
   pause();
   busy = true;
@@ -326,7 +329,7 @@ async function generate(text: string, language: InputLanguage, seed = stableSeed
     validateGlyphs(text, fontId);
     await loadDisplayFont(fontId);
     const nextAnalysis = TextDirector.analyze(text, language);
-    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId), themeId, seed, previousSignature);
+    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId, format), themeId, seed, previousSignature, format);
     const nextTheme = themeMode === 'preserve'
       ? resolveTheme(themeId, colorScheme)
       : selectedThemeFamily === null
@@ -335,6 +338,7 @@ async function generate(text: string, language: InputLanguage, seed = stableSeed
     nextBase.themeId = nextTheme.id;
     const nextSpec = withFinalImages(nextBase, imageAssets, mediaPlacement);
     await renderer.prepare(nextSpec);
+    renderer.resize(...previewSize(format));
     baseSpec = nextBase;
     spec = nextSpec;
     themeId = spec.themeId;
@@ -379,7 +383,60 @@ shell.onCreate(() => {
 shell.onRemix(() => {
   if (!started || !analysis) return;
   if (audioTrack) void audioPlayer.unlock().catch(() => {});
-  void generate(spec.sourceText, 'auto', nextRemixSeed(spec.sourceText, spec.seed), generationHistory.signatures(spec.sourceText), 'preserve', spec.fontId ?? DEFAULT_FONT_ID);
+  void generate(spec.sourceText, 'auto', nextRemixSeed(spec.sourceText, spec.seed), generationHistory.signatures(spec.sourceText), 'preserve', spec.fontId ?? DEFAULT_FONT_ID, filmFormat(spec.aspect));
+});
+shell.onFormatChange(async nextFormat => {
+  if (busy || renderingFailed || nextFormat === shell.getFormat()) return;
+  const resume = playing;
+  pause(!started);
+  busy = true;
+  shell.setState('preparing', true);
+  showMessage(null);
+  let previousSpec: SceneSpec | undefined;
+  let previousTime = current;
+  try {
+    await ready;
+    if (renderingFailed) throw new Error('Renderer unavailable.');
+    previousSpec = spec;
+    previousTime = current;
+    const nextAnalysis = analysis ?? TextDirector.analyze(spec.sourceText, spec.inputLanguage);
+    const fontId = spec.fontId ?? DEFAULT_FONT_ID;
+    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId, nextFormat), themeId, spec.seed, undefined, nextFormat);
+    const nextSpec = started ? withFinalImages(nextBase, imageAssets, mediaPlacement) : nextBase;
+    await renderer.prepare(nextSpec);
+    if (renderingFailed) throw new Error('Renderer unavailable.');
+    renderer.resize(...previewSize(nextFormat));
+    baseSpec = nextBase;
+    spec = nextSpec;
+    analysis = nextAnalysis;
+    shell.setFormat(nextFormat);
+    if (started) {
+      syncAudio();
+      syncFilm(true);
+    } else shell.setPreview({ text: spec.sourceText, language: spec.inputLanguage, duration: spec.duration, seed: spec.seed, themeId });
+    releaseDownload();
+    exportHeight = 1920;
+    shell.setExportAvailable(isExportAvailable());
+    draw(motionPreference.matches ? spec.posterTime ?? 0 : Math.min(previousTime / previousSpec.duration * spec.duration, spec.duration));
+    shell.setState(started ? 'paused' : 'idle', true);
+    busy = false;
+    if (started && resume && !motionPreference.matches) void play();
+    else if (!started) startStartupPreview();
+    window.dispatchEvent(new Event('creactors:scene'));
+  } catch (error) {
+    if (previousSpec && !renderingFailed) {
+      try {
+        await renderer.prepare(previousSpec);
+        if (renderingFailed) throw new Error('Renderer unavailable.');
+        renderer.resize(...previewSize(filmFormat(previousSpec.aspect)));
+        draw(previousTime);
+        shell.setState(started ? 'paused' : 'idle', true);
+      } catch (restoreError) { failRenderer(restoreError); }
+    }
+    if (error instanceof TooLongTextError) showMessage(copy => copy.inputTooLong);
+    else if (error instanceof FinalImageDurationError) showMessage(copy => copy.imageDurationError);
+    else { showMessage(copy => renderingFailed ? copy.renderError : copy.generationError); console.error('CREACTORS format:', error); }
+  } finally { busy = false; followSystemAppearance(); }
 });
 shell.onFontChange(async (fontId, applyToFilm) => {
   if (busy || renderingFailed) throw new Error('The film is busy.');
@@ -402,7 +459,8 @@ shell.onFontChange(async (fontId, applyToFilm) => {
   try {
     await ready;
     const nextAnalysis = analysis ?? TextDirector.analyze(spec.sourceText, spec.inputLanguage);
-    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId), themeId, spec.seed);
+    const format = filmFormat(spec.aspect);
+    const nextBase = MotionDirector.direct(nextAnalysis, measureGroups(nextAnalysis, fontId, format), themeId, spec.seed, undefined, format);
     const nextSpec = withFinalImages(nextBase, imageAssets, mediaPlacement);
     await renderer.prepare(nextSpec);
     baseSpec = nextBase;
@@ -605,39 +663,49 @@ shell.onAudioChange(settings => {
   if (resume) void play();
 });
 
-shell.onDownload(async () => {
+async function downloadFilm(kind: 'video' | 'gif') {
   if (busy || !started || renderingFailed) return;
   pause();
   releaseDownload();
   busy = true;
   exportAbort = new AbortController();
   shell.setState('exporting');
-  shell.setExportProgress({});
+  shell.setExportProgress(kind === 'gif' ? { format: 'gif' } : {});
   showMessage(null);
   try {
     let profileDetails = {};
-    const result = await new VideoExporter().export(renderer, spec, {
+    const callbacks = {
       signal: exportAbort.signal,
-      preferredHeight: exportHeight,
-      audio: audioTrack ? { ...audioTrack } : undefined,
-      onProfile(profile) {
+      onProfile(profile: { format: string; width: number; height: number }) {
         profileDetails = { format: profile.format, width: profile.width, height: profile.height };
         shell.setExportProgress(profileDetails);
       },
-      onProgress(value) { shell.setExportProgress({ ...profileDetails, value }); },
-    });
+      onProgress(value: number) { shell.setExportProgress({ ...profileDetails, value }); },
+    };
+    const result = kind === 'gif'
+      ? await new GifExporter().export(renderer, spec, callbacks)
+      : await new VideoExporter().export(renderer, spec, {
+        ...callbacks,
+        preferredHeight: exportHeight,
+        audio: audioTrack ? { ...audioTrack } : undefined,
+      });
     releaseDownload();
     completedUrl = URL.createObjectURL(result.blob);
     const download = document.createElement('a');
     download.href = completedUrl;
-    download.download = videoFilename(spec.sourceText, result.format);
+    download.download = exportFilename(spec.sourceText, result.format);
     document.body.append(download);
     download.click();
     download.remove();
-    showMessage(copy => `${copy.exportReady} ${copy.exportDetails(result.format, result.width, result.height)}`);
+    showMessage(copy => kind === 'gif'
+      ? `${copy.gifExportReady} ${copy.gifExportDetails(result.width, result.height, result.blob.size)}`
+      : `${copy.exportReady} ${copy.exportDetails(result.format, result.width, result.height)}`);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') showMessage(copy => copy.exportCancelled);
-    else if (error instanceof AudioExportCapabilityError) showMessage(copy => copy.audioExportUnavailable);
+    else if (kind === 'gif') {
+      showMessage(copy => error instanceof GifExportSizeError ? copy.gifExportTooLarge : renderingFailed ? copy.renderError : copy.gifExportError);
+      if (!(error instanceof GifExportSizeError) && !renderingFailed) console.error('CREACTORS GIF export:', error);
+    } else if (error instanceof AudioExportCapabilityError) showMessage(copy => copy.audioExportUnavailable);
     else if (error instanceof ExportCapabilityError) {
       shell.setExportAvailable(false);
       showMessage(copy => copy.exportUnavailable);
@@ -653,7 +721,9 @@ shell.onDownload(async () => {
     followSystemAppearance();
     if (!renderingFailed) draw(current);
   }
-});
+}
+shell.onDownload(() => void downloadFilm('video'));
+shell.onGifDownload(() => void downloadFilm('gif'));
 shell.onCancelExport(() => exportAbort?.abort());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && (playing || seekPlayback)) pause(!started);
@@ -681,8 +751,8 @@ if (import.meta.env.DEV) {
     get spec() { return spec; },
     get analysis() { return analysis; },
     get audio() { return audioTrack; },
-    async generate(text: string, seed = stableSeed(text), language: InputLanguage = 'auto') {
-      await generate(text, language, seed);
+    async generate(text: string, seed = stableSeed(text), language: InputLanguage = 'auto', format: FilmFormat = shell.getFormat()) {
+      await generate(text, language, seed, undefined, 'seeded', shell.getInput().fontId, format);
       pause();
       return spec;
     },
@@ -695,7 +765,7 @@ if (import.meta.env.DEV) {
       const size = renderer.getSize();
       pause();
       try {
-        renderer.resize(1080, 1920);
+        renderer.resize(1080, filmFormat(spec.aspect) === 'square' ? 1080 : 1920);
         draw(time);
         await renderer.renderFrameAsync(current);
         return shell.canvas.toDataURL('image/png');

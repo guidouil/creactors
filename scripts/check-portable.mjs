@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { Input, BlobSource, MP4, WEBM } from 'mediabunny';
+import { parseGIF } from 'gifuct-js';
 
 const file = new URL('../dist/index.html', import.meta.url);
 const liveGiphy = process.env.CREACTORS_GIPHY_LIVE === '1';
@@ -217,10 +218,56 @@ try {
       await page.waitForFunction(() => document.querySelector('.studio')?.dataset.state === 'paused');
     }
   }
+  const originalText = await page.locator('#film-transcript').textContent();
+  await page.locator('[data-film-format="square"]').click();
+  await page.waitForFunction(() => document.querySelector('.studio')?.dataset.format === 'square' && document.querySelector('.studio')?.dataset.state === 'paused');
+  assert.equal(await page.locator('#film-transcript').textContent(), originalText, 'Changing format must preserve the portable film text.');
+  assert.deepEqual(await page.locator('.stage canvas').evaluate(canvas => [canvas.width, canvas.height]), [540, 540]);
+  assert.equal(await page.locator('.image-film-source .image-item').count(), liveGiphy ? 4 : 3, 'Changing format must retain the media sequence offline.');
+  let squareExport = 'honestly unavailable';
+  if (await page.locator('.download-button').isEnabled()) {
+    const finished = page.waitForEvent('download');
+    await page.locator('.download-button').click();
+    const downloaded = await finished;
+    const bytes = await readFile(await downloaded.path());
+    const input = new Input({ source: new BlobSource(new Blob([bytes])), formats: [MP4, WEBM] });
+    try {
+      const video = await input.getPrimaryVideoTrack();
+      assert.ok(video, 'The portable square export must contain a video track.');
+      const width = await video.getDisplayWidth(), height = await video.getDisplayHeight();
+      assert.equal(width, height, 'The portable square file must encode its actual 1:1 composition.');
+      assert.ok([1080, 720].includes(width));
+      assert.ok(await input.getPrimaryAudioTrack(), 'The portable square export must retain its soundtrack.');
+      squareExport = `${width}x${height}`;
+    } finally { input.dispose(); }
+    await page.waitForFunction(() => document.querySelector('.studio')?.dataset.state === 'paused');
+    assert.deepEqual(await page.locator('.stage canvas').evaluate(canvas => [canvas.width, canvas.height]), [540, 540], 'Square export must restore the square preview.');
+  }
+  const gifDuration = Number(await page.locator('.progress-track').getAttribute('max'));
+  const gifFinished = page.waitForEvent('download');
+  await page.locator('.gif-download-button').click();
+  const gifDownloaded = await gifFinished;
+  const exportedGifBytes = await readFile(await gifDownloaded.path());
+  assert.ok(gifDownloaded.suggestedFilename().endsWith('.gif'));
+  assert.ok(exportedGifBytes.byteLength < 5_000_000, 'The portable GIF must respect the mobile file budget.');
+  const gif = parseGIF(Uint8Array.from(exportedGifBytes).buffer);
+  const gifFrames = gif.frames.filter(frame => frame.image);
+  assert.equal(gif.header.signature, 'GIF');
+  assert.equal(gif.lsd.width, gif.lsd.height, 'The portable GIF retains the selected square composition.');
+  assert.ok(gifFrames.length > 1 && gifFrames.length <= 350);
+  assert.ok(gif.lsd.width * gif.lsd.height * gifFrames.length <= 36_152_320);
+  assert.ok(Math.abs(gifFrames.reduce((sum, frame) => sum + frame.gce.delay, 0) / 100 - gifDuration) <= 0.01, 'The portable GIF preserves the complete film duration.');
+  const nativeGifSize = await page.evaluate(async encoded => {
+    const image = new Image(); image.src = `data:image/gif;base64,${encoded}`;
+    await image.decode(); return [image.naturalWidth, image.naturalHeight];
+  }, exportedGifBytes.toString('base64'));
+  assert.deepEqual(nativeGifSize, [gif.lsd.width, gif.lsd.height]);
+  await page.waitForFunction(() => document.querySelector('.studio')?.dataset.state === 'paused');
+  assert.deepEqual(await page.locator('.stage canvas').evaluate(canvas => [canvas.width, canvas.height]), [540, 540], 'GIF export must restore the portable preview.');
   await page.screenshot({ path: new URL('portable.png', directory).pathname });
   assert.deepEqual(errors, [], 'Portable film must render without uncaught errors.');
   assert.deepEqual(requests, [], 'Portable film must not attempt runtime downloads.');
-  console.log(JSON.stringify({ file: file.pathname, externalRequests: requests.length, pageErrors: errors.length, welcomeAnimation: 'passed', help: 'passed', playback: 'passed', portrait: 'passed', productionIsolation: 'passed', freeInput: 'passed', examples: 'passed', filename: 'passed', monochromeEmoji: 'passed', remix: 'passed', themes: 'passed', systemAppearance: 'passed', finalImages: 'passed', animatedGif: 'passed', giphySearch: liveGiphy ? 'passed' : 'not requested', giphyRequests, giphyExport, export: exportResult, audio: audioResult, audioLibrary: audioIds, audioCredits: 'passed', audioSource: 'meme-de-creditos-finales', audioEnergy }));
+  console.log(JSON.stringify({ file: file.pathname, externalRequests: requests.length, pageErrors: errors.length, welcomeAnimation: 'passed', help: 'passed', playback: 'passed', portrait: 'passed', square: 'passed', squareExport, gifExport: `${gif.lsd.width}x${gif.lsd.height}`, gifBytes: exportedGifBytes.byteLength, gifFrames: gifFrames.length, productionIsolation: 'passed', freeInput: 'passed', examples: 'passed', filename: 'passed', monochromeEmoji: 'passed', remix: 'passed', themes: 'passed', systemAppearance: 'passed', finalImages: 'passed', animatedGif: 'passed', giphySearch: liveGiphy ? 'passed' : 'not requested', giphyRequests, giphyExport, export: exportResult, audio: audioResult, audioLibrary: audioIds, audioCredits: 'passed', audioSource: 'meme-de-creditos-finales', audioEnergy }));
 } finally {
   await browser.close();
 }

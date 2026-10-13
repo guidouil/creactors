@@ -11,6 +11,7 @@ import { graphemes } from '../text/graphemes';
 import { builtinAudioTracks, getBuiltinAudio, isBuiltinAudioId } from '../audio/choices';
 import { mountEasterEggs } from './easter-eggs';
 import { findSecretFilm, type SecretFilmId } from '../direction/secrets';
+import { filmAspect, type FilmFormat } from '../scene/format';
 
 export type ShellState = 'idle' | 'preparing' | 'playing' | 'paused' | 'ended' | 'exporting' | 'error';
 
@@ -21,6 +22,7 @@ export interface ShellOptions {
   themeId?: string;
   automaticTheme?: boolean;
   fontId?: string;
+  format?: FilmFormat;
 }
 
 export interface FilmDetails {
@@ -65,7 +67,8 @@ export interface ImageDetails {
 export interface Shell {
   canvas: HTMLCanvasElement;
   stage: HTMLElement;
-  getInput(): { text: string; fontId: string };
+  getInput(): { text: string; fontId: string; format: FilmFormat };
+  getFormat(): FilmFormat;
   onCreate(callback: () => void): void;
   onExample(callback: () => void): void;
   onTogglePlayback(callback: () => void): void;
@@ -75,10 +78,12 @@ export interface Shell {
   onSeekEnd(callback: (cancelled?: boolean) => void): void;
   onRemix(callback: () => void): void;
   onDownload(callback: () => void): void;
+  onGifDownload(callback: () => void): void;
   onCancelExport(callback: () => void): void;
   onEdit(callback: () => void): void;
   onThemeChange(callback: (familyId: string | null) => void): void;
   onFontChange(callback: (fontId: string, applyToFilm: boolean) => void | Promise<void>): void;
+  onFormatChange(callback: (format: FilmFormat) => void | Promise<void>): void;
   onImageImport(callback: (files: File[]) => void): void;
   onGiphySelect(callback: (result: GiphyResult, signal: AbortSignal) => Promise<void>): void;
   onImageRemove(callback: (index: number) => void): void;
@@ -93,6 +98,7 @@ export interface Shell {
   setExampleText(text: string): void;
   setTheme(themeId: string, automatic: boolean): void;
   setFont(fontId: string): void;
+  setFormat(format: FilmFormat): void;
   setImages(details: ImageDetails[]): void;
   setMediaPlacement(placement: MediaPlacement): void;
   setImageLoading(loading: boolean): void;
@@ -103,6 +109,7 @@ export interface Shell {
   setProgress(progress: number): void;
   setExportProgress(progress: ExportProgress | null): void;
   setExportAvailable(available: boolean): void;
+  setGifExportAvailable(available: boolean): void;
   setMessage(message: string | null): void;
   getLocale(): Locale;
 }
@@ -115,11 +122,13 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   let editing = true;
   let hasFilm = false;
   let exportAvailable = false;
+  let gifExportAvailable = true;
   let exportProgress: ExportProgress | null = null;
   let themeId = options.themeId ?? 'califormandy-sunset';
   let automaticTheme = options.automaticTheme ?? true;
   let fontId = options.fontId ?? DEFAULT_FONT_ID;
   let filmFontId = fontId;
+  let format = options.format ?? 'vertical';
   let fontPickerAppliesToFilm = false;
   let imageDetails: ImageDetails[] = [];
   let imageLoading = false;
@@ -137,10 +146,12 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   let seekEndCallback: (cancelled?: boolean) => void = () => undefined;
   let remixCallback: () => void = () => undefined;
   let downloadCallback: () => void = () => undefined;
+  let gifDownloadCallback: () => void = () => undefined;
   let cancelExportCallback: () => void = () => undefined;
   let editCallback: () => void = () => undefined;
   let themeCallback: (familyId: string | null) => void = () => undefined;
   let fontCallback: (fontId: string, applyToFilm: boolean) => void | Promise<void> = () => undefined;
+  let formatCallback: (format: FilmFormat) => void | Promise<void> = () => undefined;
   let imageImportCallback: (files: File[]) => void = () => undefined;
   let giphySelectCallback: (result: GiphyResult, signal: AbortSignal) => Promise<void> = async () => undefined;
   let imageRemoveCallback: (index: number) => void = () => undefined;
@@ -190,7 +201,14 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
           <div class="image-editor-attributions image-attributions" hidden></div>
         </section>
         <section class="film-panel">
-          <div class="film-meta" aria-hidden="true"><span class="film-index">01</span><span>9:16</span><span class="film-duration">12 S</span></div>
+          <div class="film-meta">
+            <span class="film-index" aria-hidden="true">01</span>
+            <div class="format-switch" role="group">
+              <button type="button" data-film-format="vertical" aria-pressed="true"><span class="format-name"></span><span class="format-ratio" aria-hidden="true">9:16</span></button>
+              <button type="button" data-film-format="square" aria-pressed="false"><span class="format-name"></span><span class="format-ratio" aria-hidden="true">1:1</span></button>
+            </div>
+            <span class="film-duration" aria-hidden="true">12 S</span>
+          </div>
           <p class="film-secret" role="status" hidden></p>
           <div class="stage"><canvas width="540" height="960"></canvas><div class="stage-corner top-left" aria-hidden="true"></div><div class="stage-corner bottom-right" aria-hidden="true"></div></div>
           <p id="film-transcript" class="sr-only"></p>
@@ -204,6 +222,8 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
               <div class="film-actions">
                 <button class="remix-button icon-button" type="button">${icon('remix')}</button>
                 <button class="download-button icon-button" type="button">${icon('download')}</button>
+                <button class="gif-download-button icon-button" type="button" aria-describedby="gif-download-hint"><span aria-hidden="true">GIF</span></button>
+                <span id="gif-download-hint" class="sr-only"></span>
                 <button class="edit-button icon-button" type="button">${icon('edit')}</button>
               </div>
             </div>
@@ -293,6 +313,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   const replay = find<HTMLButtonElement>('.replay-button');
   const remix = find<HTMLButtonElement>('.remix-button');
   const download = find<HTMLButtonElement>('.download-button');
+  const gifDownload = find<HTMLButtonElement>('.gif-download-button');
   const edit = find<HTMLButtonElement>('.edit-button');
   const help = find<HTMLButtonElement>('.help-button');
   const helpDialog = find<HTMLDialogElement>('.help-dialog');
@@ -380,6 +401,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   const audioPresetButtons = [...host.querySelectorAll<HTMLButtonElement>('[data-audio-preset]')];
   const imageButtons = [...host.querySelectorAll<HTMLButtonElement>('.image-button')];
   const fontButtons = [...host.querySelectorAll<HTMLButtonElement>('.font-button')];
+  const formatButtons = [...host.querySelectorAll<HTMLButtonElement>('[data-film-format]')];
   const imageGalleries = [...host.querySelectorAll<HTMLElement>('.image-gallery')];
   const imageAttributions = [...host.querySelectorAll<HTMLElement>('.image-attributions')];
   const placementGroups = [...host.querySelectorAll<HTMLElement>('.image-placement')];
@@ -425,6 +447,13 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     scheduleQuoteFontSize();
     // The browser must use the loaded face rather than a fallback's advances.
     void loadDisplayFont(id).then(() => { if (fontId === id) scheduleQuoteFontSize(); }).catch(() => undefined);
+  }
+
+  function setFormat(next: FilmFormat) {
+    format = next;
+    studio.dataset.format = format;
+    studio.style.setProperty('--film-aspect', String(filmAspect(format)));
+    updateLabels();
   }
 
   function fitQuoteFontSize() {
@@ -620,6 +649,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   });
   remix.addEventListener('click', () => remixCallback());
   download.addEventListener('click', () => downloadCallback());
+  gifDownload.addEventListener('click', () => gifDownloadCallback());
   cancelExport.addEventListener('click', () => cancelExportCallback());
   for (const button of imageButtons) button.addEventListener('click', () => giphyPicker.open(button));
   imageFile.addEventListener('change', () => {
@@ -941,7 +971,14 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     canvas.setAttribute('aria-label', copy.stage);
     canvas.setAttribute('role', 'img');
     canvas.setAttribute('aria-describedby', 'film-transcript');
-    stage.setAttribute('aria-label', copy.format(Math.round(duration * 10) / 10));
+    stage.setAttribute('aria-label', copy.format(Math.round(duration * 10) / 10, format));
+    find<HTMLElement>('.format-switch').setAttribute('aria-label', copy.filmFormat);
+    for (const button of formatButtons) {
+      const vertical = button.dataset.filmFormat === 'vertical';
+      button.querySelector<HTMLElement>('.format-name')!.textContent = vertical ? copy.formatVertical : copy.formatSquare;
+      button.setAttribute('aria-pressed', String(button.dataset.filmFormat === format));
+      buttonLabel(button, vertical ? copy.formatVerticalLabel : copy.formatSquareLabel);
+    }
     buttonLabel(create, copy.createLabel);
     buttonLabel(example, copy.example);
     buttonLabel(help, copy.help);
@@ -982,6 +1019,9 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     buttonLabel(replay, copy.replay);
     buttonLabel(remix, copy.remix);
     buttonLabel(download, exportAvailable ? copy.download : copy.exportUnavailable);
+    buttonLabel(gifDownload, copy.gifDownload);
+    gifDownload.title = `${copy.gifDownload} · ${copy.gifDownloadHint}`;
+    find<HTMLElement>('#gif-download-hint').textContent = copy.gifDownloadHint;
     buttonLabel(edit, copy.edit);
     buttonLabel(cancelExport, copy.cancelExport);
     find<HTMLElement>('.state-announcement').textContent = state === 'idle' ? copy.ready : copy[state];
@@ -1015,10 +1055,13 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     replay.disabled = busy;
     remix.disabled = busy;
     download.disabled = busy || !exportAvailable;
+    gifDownload.hidden = !hasFilm;
+    gifDownload.disabled = busy || !hasFilm || !gifExportAvailable;
     edit.disabled = busy;
     toggle.hidden = state === 'ended';
     for (const button of themeButtons) button.disabled = busy;
     for (const button of fontButtons) button.disabled = busy;
+    for (const button of formatButtons) button.disabled = busy;
     fontPicker.setDisabled(busy);
     updateLabels();
   }
@@ -1047,6 +1090,20 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
       themeCallback(next);
     });
   }
+  for (const button of formatButtons) {
+    button.addEventListener('click', async () => {
+      const next = button.dataset.filmFormat as FilmFormat;
+      if (button.disabled || next === format) return;
+      const hadFocus = document.activeElement === button;
+      try {
+        await formatCallback(next);
+      } finally {
+        if (hadFocus && document.activeElement === document.body && button.isConnected && !button.disabled) {
+          button.focus({ preventScroll: true });
+        }
+      }
+    });
+  }
 
   function updateTheme() {
     stage.style.setProperty('--stage-background', getTheme(themeId).background);
@@ -1056,13 +1113,15 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
   }
 
   setFont(fontId);
+  setFormat(format);
   updateTheme();
   updateState();
 
   return {
     canvas,
     stage,
-    getInput() { return { text: quote.value, fontId }; },
+    getInput() { return { text: quote.value, fontId, format }; },
+    getFormat() { return format; },
     onCreate(callback) { createCallback = callback; },
     onExample(callback) { exampleCallback = callback; },
     onTogglePlayback(callback) { toggleCallback = callback; },
@@ -1072,10 +1131,12 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     onSeekEnd(callback) { seekEndCallback = callback; },
     onRemix(callback) { remixCallback = callback; },
     onDownload(callback) { downloadCallback = callback; },
+    onGifDownload(callback) { gifDownloadCallback = callback; },
     onCancelExport(callback) { cancelExportCallback = callback; },
     onEdit(callback) { editCallback = callback; },
     onThemeChange(callback) { themeCallback = callback; },
     onFontChange(callback) { fontCallback = callback; },
+    onFormatChange(callback) { formatCallback = callback; },
     onImageImport(callback) { imageImportCallback = callback; },
     onGiphySelect(callback) { giphySelectCallback = callback; },
     onImageRemove(callback) { imageRemoveCallback = callback; },
@@ -1088,6 +1149,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     getLocale() { return locale; },
     setExampleText,
     setFont,
+    setFormat,
     setFilm(film, preserveEditing = false) {
       duration = Math.max(0.1, film.duration);
       themeId = film.themeId;
@@ -1161,6 +1223,7 @@ export function mountShell(host: HTMLElement, options: ShellOptions): Shell {
     },
     setExportProgress(value) { exportProgress = value; updateExport(); },
     setExportAvailable(value) { exportAvailable = value; updateState(); },
+    setGifExportAvailable(value) { gifExportAvailable = value; updateState(); },
     setMessage(value) {
       message.textContent = value ?? '';
       message.hidden = !value;

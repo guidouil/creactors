@@ -1,10 +1,11 @@
 import { canEncodeVideo, Quality, type VideoEncodingConfig } from 'mediabunny';
+import type { FilmFormat } from '../scene/format';
 
 export interface ExportProfile {
   format: 'mp4' | 'webm';
   codec: 'avc' | 'vp9' | 'vp8';
   width: 1080 | 720;
-  height: 1920 | 1280;
+  height: 1920 | 1280 | 1080 | 720;
   bitrate: number;
   fps: 30;
 }
@@ -16,14 +17,15 @@ export function isExportAvailable(): boolean {
     && typeof globalThis.VideoFrame !== 'undefined';
 }
 
-export function candidateProfiles(preferredHeight: 1920 | 1280 = 1920): ExportProfile[] {
-  const heights = preferredHeight === 1280 ? [1280] as const : [1920, 1280] as const;
-  return (['avc', 'vp9', 'vp8'] as const).flatMap(codec => heights.map(height => ({
+/** The legacy portrait height selects quality for both film formats. */
+export function candidateProfiles(preferredHeight: 1920 | 1280 = 1920, filmFormat: FilmFormat = 'vertical'): ExportProfile[] {
+  const widths = preferredHeight === 1280 ? [720] as const : [1080, 720] as const;
+  return (['avc', 'vp9', 'vp8'] as const).flatMap(codec => widths.map(width => ({
     format: codec === 'avc' ? 'mp4' as const : 'webm' as const,
     codec,
-    width: height === 1920 ? 1080 as const : 720 as const,
-    height,
-    bitrate: height === 1920 ? 12_000_000 : 6_000_000,
+    width,
+    height: filmFormat === 'square' ? width : width === 1080 ? 1920 as const : 1280 as const,
+    bitrate: width === 1080 ? 12_000_000 : 6_000_000,
     fps: 30 as const,
   })));
 }
@@ -40,10 +42,10 @@ export function encodingConfig(profile: ExportProfile): VideoEncodingConfig {
   };
 }
 
-/** Baseline AVC avoids frame reordering; exact portrait levels are probed. */
+/** Baseline AVC avoids frame reordering; both actual film sizes are probed. */
 export function nativeAvcConfig(profile: ExportProfile): VideoEncoderConfig {
   return {
-    codec: profile.height === 1920 ? 'avc1.420028' : 'avc1.42001f',
+    codec: profile.width === 1080 ? 'avc1.420028' : 'avc1.42001f',
     width: profile.width,
     height: profile.height,
     bitrate: profile.bitrate,
@@ -69,10 +71,10 @@ export async function profileIsSupported(profile: ExportProfile): Promise<boolea
 }
 
 /** Configuration checks for UI capability hints. Export also encodes a smoke file. */
-export async function detectProfiles(preferredHeight: 1920 | 1280 = 1920): Promise<ExportProfile[]> {
+export async function detectProfiles(preferredHeight: 1920 | 1280 = 1920, filmFormat: FilmFormat = 'vertical'): Promise<ExportProfile[]> {
   if (!isExportAvailable()) return [];
   const supported: ExportProfile[] = [];
-  for (const profile of candidateProfiles(preferredHeight)) {
+  for (const profile of candidateProfiles(preferredHeight, filmFormat)) {
     try { if (await profileIsSupported(profile)) supported.push(profile); }
     catch { /* Some browsers throw for unsupported codec options. */ }
   }

@@ -3,7 +3,7 @@ import type { SceneRenderer } from '../src/scene/renderer';
 import type { SceneSpec } from '../src/scene/types';
 
 const mock = vi.hoisted(() => ({
-  jobs: [] as Array<{ source: { config: { codec: string }; frames: Array<{ timestamp: number; duration: number; keyFrame: boolean; renderedTime: number }> }; state: string; target: { buffer: ArrayBuffer | null }; format: { kind: string } }>,
+  jobs: [] as Array<{ source: { config: { codec: string }; frames: Array<{ timestamp: number; duration: number; keyFrame: boolean; renderedTime: number; size: [number, number] }> }; state: string; target: { buffer: ArrayBuffer | null }; format: { kind: string } }>,
   support: vi.fn(async (_codec: string, _options: { height: number }) => true),
   failFinalize: null as null | ((index: number) => boolean),
   failAdd: null as null | ((job: number, frame: number) => boolean),
@@ -13,7 +13,9 @@ const mock = vi.hoisted(() => ({
   encoders: [] as Array<{ submitted: number; emitted: number; maxPending: number; flushes: number; state: string }>,
   frameCloses: 0,
   nativeSources: [] as Array<{ frames: unknown[] }>,
+  nativeConfigs: [] as VideoEncoderConfig[],
   frameTimes: new Map<number, number>(),
+  frameSizes: new Map<number, [number, number]>(),
   timestampShift: 0,
   dropFrame: null as null | ((job: number, frame: number) => boolean),
 }));
@@ -27,15 +29,16 @@ vi.mock('mediabunny', () => {
     constructor(readonly data: Uint8Array, readonly type: string, readonly timestamp: number, readonly duration: number) {}
   }
   class CanvasSource {
-    frames: Array<{ timestamp: number; duration: number; keyFrame: boolean; renderedTime: number }> = [];
+    frames: Array<{ timestamp: number; duration: number; keyFrame: boolean; renderedTime: number; size: [number, number] }> = [];
     closed = false;
-    constructor(_canvas: unknown, readonly config: { codec: string }) {}
+    constructor(private canvas: { width: number; height: number } | null, readonly config: { codec: string }) {}
     async add(timestamp: number, duration: number, options: { keyFrame: boolean }) {
       const job = mock.jobs.findIndex(item => item.source === this);
       if (mock.failAdd?.(job, this.frames.length)) throw new Error('Encoder resource failure');
       mock.activeAdds++;
       mock.maxActiveAdds = Math.max(mock.maxActiveAdds, mock.activeAdds);
-      this.frames.push({ timestamp, duration, keyFrame: options.keyFrame, renderedTime: mock.renderTime });
+      const size: [number, number] = this.canvas ? [this.canvas.width, this.canvas.height] : mock.frameSizes.get(timestamp)!;
+      this.frames.push({ timestamp, duration, keyFrame: options.keyFrame, renderedTime: mock.renderTime, size });
       await Promise.resolve();
       mock.activeAdds--;
     }
@@ -81,8 +84,11 @@ import { candidateProfiles, nativeAvcConfig } from '../src/export/profiles';
 
 class NativeVideoFrame {
   readonly renderedTime = mock.renderTime;
+  readonly size: [number, number];
   closed = false;
-  constructor(_canvas: unknown, readonly timing: { timestamp: number; duration: number }) {}
+  constructor(canvas: { width: number; height: number }, readonly timing: { timestamp: number; duration: number }) {
+    this.size = [canvas.width, canvas.height];
+  }
   close() { this.closed = true; mock.frameCloses++; }
 }
 
@@ -99,7 +105,7 @@ class BufferedNativeEncoder {
   private source = mock.nativeSources.at(-1);
   private pending: Array<{ frame: NativeVideoFrame; keyFrame: boolean }> = [];
   constructor(private callbacks: VideoEncoderInit) { mock.encoders.push(this); }
-  configure() { this.state = 'configured'; }
+  configure(config: VideoEncoderConfig) { this.state = 'configured'; mock.nativeConfigs.push(config); }
   encode(frame: NativeVideoFrame, options: { keyFrame: boolean }) {
     const job = mock.jobs.findIndex(item => item.source === this.source);
     if (mock.failAdd?.(job, this.submitted)) throw new Error('Encoder resource failure');
@@ -118,6 +124,7 @@ class BufferedNativeEncoder {
       // Test exact timestamp restoration without relying on rounded timing.
       const exact = Math.round(frame.timing.timestamp * 30 / 1_000_000) / 30;
       mock.frameTimes.set(exact, frame.renderedTime);
+      mock.frameSizes.set(exact, frame.size);
       this.callbacks.output({ timestamp: frame.timing.timestamp + mock.timestampShift, byteLength: 1,
         type: keyFrame ? 'key' : 'delta', copyTo: () => {} } as unknown as EncodedVideoChunk, {});
       this.emitted++;
@@ -127,21 +134,22 @@ class BufferedNativeEncoder {
   close() { this.state = 'closed'; this.pending.length = 0; }
 }
 
-function scene(duration = 0.1): SceneSpec {
+function scene(duration = 0.1, aspect = 9 / 16): SceneSpec {
   return {
     id: 'export-test', generatorVersion: '1', fontVersion: '1', sourceText: 'Test vidéo.',
-    inputLanguage: 'fr', themeId: 'sunset', seed: 1, duration, fps: 30, aspect: 9 / 16,
+    inputLanguage: 'fr', themeId: 'sunset', seed: 1, duration, fps: 30, aspect,
     fov: 38, objects: [], cameraTracks: [], chapters: [],
   };
 }
 
-function renderer() {
-  let size: [number, number] = [540, 960];
+function renderer(initialSize: [number, number] = [540, 960]) {
+  let size: [number, number] = initialSize;
+  const canvas = Object.assign(new EventTarget(), { width: size[0], height: size[1] });
   const instance = {
-    canvas: new EventTarget(),
+    canvas,
     lastTime: 4.2,
     getSize: () => [...size] as [number, number],
-    resize: vi.fn((width: number, height: number) => { size = [width, height]; }),
+    resize: vi.fn((width: number, height: number) => { size = [width, height]; canvas.width = width; canvas.height = height; }),
     renderFrame: vi.fn((time: number) => { instance.lastTime = mock.renderTime = time; }),
   };
   return instance as unknown as SceneRenderer;
@@ -152,9 +160,11 @@ beforeEach(() => {
   mock.failAdd = mock.failFinalize = null;
   mock.renderTime = mock.activeAdds = mock.maxActiveAdds = 0;
   mock.encoders.length = mock.nativeSources.length = 0;
+  mock.nativeConfigs.length = 0;
   mock.frameCloses = mock.timestampShift = 0;
   mock.dropFrame = null;
   mock.frameTimes.clear();
+  mock.frameSizes.clear();
   mock.support.mockReset().mockResolvedValue(true);
   vi.stubGlobal('VideoEncoder', BufferedNativeEncoder);
   vi.stubGlobal('VideoFrame', NativeVideoFrame);
@@ -172,6 +182,52 @@ describe('native video export', () => {
       'avc/1920', 'avc/1280', 'vp9/1920', 'vp9/1280', 'vp8/1920', 'vp8/1280',
     ]);
     expect(mock.support).toHaveBeenCalledWith('avc', expect.objectContaining({ width: 1080, height: 1920, frameRate: 30, latencyMode: 'quality' }));
+  });
+
+  it('probes square dimensions at both quality levels with valid AVC levels', async () => {
+    mock.support.mockImplementation(async (codec, options) => codec === 'vp9' && options.height === 720);
+    expect(await detectProfiles(1920, 'square')).toEqual([
+      { format: 'webm', codec: 'vp9', width: 720, height: 720, bitrate: 6_000_000, fps: 30 },
+    ]);
+    const profiles = candidateProfiles(1920, 'square');
+    expect(profiles.map(profile => `${profile.codec}/${profile.width}x${profile.height}`)).toEqual([
+      'avc/1080x1080', 'avc/720x720', 'vp9/1080x1080', 'vp9/720x720', 'vp8/1080x1080', 'vp8/720x720',
+    ]);
+    // 1080-square exceeds AVC level 3.1's 3600-macroblock frame limit.
+    expect(nativeAvcConfig(profiles[0])).toMatchObject({ codec: 'avc1.420028', width: 1080, height: 1080 });
+    expect(nativeAvcConfig(profiles[1])).toMatchObject({ codec: 'avc1.42001f', width: 720, height: 720 });
+    expect(mock.support).toHaveBeenCalledWith('avc', expect.objectContaining({ width: 1080, height: 1080, frameRate: 30 }));
+    expect(candidateProfiles(1280, 'square').every(profile => profile.width === 720 && profile.height === 720)).toBe(true);
+  });
+
+  it('captures square probe and final frames, then restores the square preview', async () => {
+    const preview = renderer([540, 540]);
+    const onProfile = vi.fn();
+    const result = await new VideoExporter().export(preview, scene(0.1, 1), { onProfile });
+    expect(result).toMatchObject({ format: 'mp4', width: 1080, height: 1080, fps: 30 });
+    expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ width: 1080, height: 1080 }));
+    expect(mock.nativeConfigs).toHaveLength(2);
+    expect(mock.nativeConfigs.every(config => config.width === 1080 && config.height === 1080)).toBe(true);
+    expect(mock.jobs[0].source.frames).toHaveLength(24);
+    expect(mock.jobs[1].source.frames).toHaveLength(3);
+    expect(mock.jobs.every(job => job.source.frames.every(frame => frame.size[0] === 1080 && frame.size[1] === 1080))).toBe(true);
+    expect(preview.getSize()).toEqual([540, 540]);
+    expect(preview.lastTime).toBe(4.2);
+    expect(mock.jobs.every(job => job.target.buffer === null)).toBe(true);
+  });
+
+  it('discloses a square fallback when the full-size square smoke file fails', async () => {
+    mock.failFinalize = index => index === 0;
+    const preview = renderer([540, 540]);
+    const onProfile = vi.fn();
+    const result = await new VideoExporter().export(preview, scene(0.1, 1), { onProfile });
+    expect(result).toMatchObject({ format: 'mp4', width: 720, height: 720 });
+    expect(mock.jobs[0].state).toBe('canceled');
+    expect(onProfile).toHaveBeenCalledOnce();
+    expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ width: 720, height: 720 }));
+    expect(mock.jobs[2].source.frames.every(frame => frame.size[0] === 720 && frame.size[1] === 720)).toBe(true);
+    expect(preview.getSize()).toEqual([540, 540]);
+    expect(preview.lastTime).toBe(4.2);
   });
 
   it('exports absolute timestamps with awaited backpressure and restores preview', async () => {
@@ -223,12 +279,16 @@ describe('native video export', () => {
     expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ format: 'mp4', height: 1280 }));
   });
 
-  it('returns actual WebM when native AVC cannot encode', async () => {
+  it.each([
+    { aspect: 9 / 16, height: 1920 },
+    { aspect: 1, height: 1080 },
+  ])('returns actual WebM at aspect $aspect when native AVC cannot encode', async ({ aspect, height }) => {
     mock.support.mockImplementation(async codec => codec === 'vp8');
-    const result = await new VideoExporter().export(renderer(), scene());
-    expect(result).toMatchObject({ format: 'webm', width: 1080, height: 1920 });
+    const result = await new VideoExporter().export(renderer(), scene(0.1, aspect));
+    expect(result).toMatchObject({ format: 'webm', width: 1080, height });
     expect(result.blob.type).toBe('video/webm');
     expect(mock.jobs[1].source.config.codec).toBe('vp8');
+    expect(mock.jobs.every(job => job.source.frames.every(frame => frame.size[0] === 1080 && frame.size[1] === height))).toBe(true);
   });
 
   it('fails clearly when WebCodecs or all actual configurations are unavailable', async () => {
@@ -241,16 +301,19 @@ describe('native video export', () => {
     expect(mock.jobs).toHaveLength(0);
   });
 
-  it('cancels encoding and restores the renderer without leaving file data', async () => {
-    const preview = renderer();
+  it.each([
+    { aspect: 9 / 16, size: [540, 960] as [number, number] },
+    { aspect: 1, size: [540, 540] as [number, number] },
+  ])('cancels encoding at aspect $aspect and restores the renderer without leaving file data', async ({ aspect, size }) => {
+    const preview = renderer(size);
     const controller = new AbortController();
-    await expect(new VideoExporter().export(preview, scene(2), {
+    await expect(new VideoExporter().export(preview, scene(2, aspect), {
       signal: controller.signal,
       onProgress: value => { if (value > 0) controller.abort(); },
     })).rejects.toMatchObject({ name: 'AbortError' });
     expect(mock.jobs[1].state).toBe('canceled');
     expect(mock.jobs.every(job => job.target.buffer === null)).toBe(true);
-    expect(preview.getSize()).toEqual([540, 960]);
+    expect(preview.getSize()).toEqual(size);
     expect(preview.lastTime).toBe(4.2);
   });
 
@@ -262,11 +325,45 @@ describe('native video export', () => {
     expect(preview.getSize()).toEqual([540, 960]);
   });
 
+  it.each([
+    { preferredHeight: 1920 as const, retryAt720p: true },
+    { preferredHeight: 1280 as const, retryAt720p: false },
+  ])('offers a square resource retry only from full quality ($preferredHeight)', async ({ preferredHeight, retryAt720p }) => {
+    mock.failAdd = (job, frame) => job === 1 && frame === 1;
+    const preview = renderer([540, 540]);
+    await expect(new VideoExporter().export(preview, scene(0.1, 1), { preferredHeight }))
+      .rejects.toMatchObject({ name: 'ExportResourceError', retryAt720p });
+    expect(mock.jobs[1].state).toBe('canceled');
+    expect(preview.getSize()).toEqual([540, 540]);
+    expect(preview.lastTime).toBe(4.2);
+    expect(mock.jobs.every(job => job.target.buffer === null)).toBe(true);
+  });
+
+  it('offers the square low-quality retry after a full-size context loss', async () => {
+    const preview = renderer([540, 540]);
+    await expect(new VideoExporter().export(preview, scene(0.1, 1), {
+      onProgress: value => { if (value > 0) preview.canvas.dispatchEvent(new Event('webglcontextlost')); },
+    })).rejects.toMatchObject({ name: 'ExportResourceError', retryAt720p: true });
+    expect(preview.getSize()).toEqual([540, 540]);
+    expect(preview.lastTime).toBe(4.2);
+  });
+
   it('uses the requested 720p retry rather than reproposing 1080p', async () => {
     const result = await new VideoExporter().export(renderer(), scene(), { preferredHeight: 1280 });
     expect(result.height).toBe(1280);
     expect(mock.support).toHaveBeenCalledOnce();
     expect(mock.support).toHaveBeenCalledWith('avc', expect.objectContaining({ width: 720, height: 1280 }));
+  });
+
+  it('uses the legacy low-quality setting to export a 720-square retry', async () => {
+    const preview = renderer([540, 540]);
+    const result = await new VideoExporter().export(preview, scene(0.1, 1), { preferredHeight: 1280 });
+    expect(result).toMatchObject({ width: 720, height: 720 });
+    expect(mock.support).toHaveBeenCalledOnce();
+    expect(mock.support).toHaveBeenCalledWith('avc', expect.objectContaining({ width: 720, height: 720 }));
+    expect(mock.nativeConfigs.every(config => config.width === 720 && config.height === 720)).toBe(true);
+    expect(mock.jobs.every(job => job.source.frames.every(frame => frame.size[0] === 720 && frame.size[1] === 720))).toBe(true);
+    expect(preview.getSize()).toEqual([540, 540]);
   });
 
   it('adds keyframes at two-second intervals and exact cinematic cuts', () => {

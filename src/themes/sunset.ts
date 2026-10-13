@@ -1,9 +1,11 @@
+// Califormandy's paper, ink, pink and lime, with the stickers' electric blue.
+// https://califormandy.com/
 export const sunset = {
-  background: '#111126',
-  white: '#EDE8FA',
-  pink: '#F58BB4',
-  coral: '#FFB58A',
-  cyan: '#77D7F5',
-  violet: '#33235C',
-  side: '#33235C',
+  background: '#20211F',
+  white: '#F5F2E9',
+  pink: '#FB398F',
+  coral: '#D4EF53',
+  cyan: '#35DFFF',
+  violet: '#F5F2E9',
+  side: '#62635D',
 } as const;

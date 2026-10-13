@@ -1,23 +1,22 @@
 import { FUTURE_QUOTE, futureDemo } from '../demos/future';
 import type { CameraPose, CameraTrack, ColorRole, SceneObject, SceneSpec, Vec3 } from '../scene/types';
 import type { TextAnalysis } from '../text/director';
-import type { MeasuredGroup } from '../typography/measure';
+import { groupWidthLimit, type MeasuredGroup } from '../typography/measure';
 import { emojiCoverage } from '../typography/emoji';
 import { DEFAULT_FONT_ID, getDisplayFont } from '../typography/fonts';
 import { applySecretFilm } from './secrets';
+import { filmAspect, type FilmFormat } from '../scene/format';
 
 const GENERATOR_VERSION = 'spatial-grammar-2.3.2';
 const FPS = 30;
 const FOV = 38;
-const ASPECT = 9 / 16;
-const POSTER_REFERENCE_HEIGHT = 640;
+const POSTER_REFERENCE_WIDTH = 360;
 const MIN_POSTER_CAP_PIXELS = 24;
 // NDC safe bounds [-0.64, 0.76]: 18% below and 12% above the lettering.
 const POSTER_SAFE_HEIGHT = 0.70;
 const POSTER_SAFE_CENTER = 0.06;
 const HALF_ANGLE = Math.tan(FOV * Math.PI / 360);
 const NEAR_PLANE = 0.05;
-const NEAR_FRUSTUM_CORNER = NEAR_PLANE * HALF_ANGLE * Math.hypot(1, ASPECT);
 const frameTime = (time: number) => Math.round(time * FPS) / FPS;
 type DirectionStyle = NonNullable<SceneSpec['directionStyle']>;
 
@@ -105,29 +104,29 @@ export function sceneSignature(spec: SceneSpec): string {
   });
 }
 
-function distanceToFit(group: MeasuredGroup, fontSize: number, scale = 1): number {
+function distanceToFit(group: MeasuredGroup, fontSize: number, aspect: number, scale = 1): number {
   // Conservative symmetric vertical fit also respects the larger bottom margin.
   return Math.max(
-    group.width * fontSize * scale / (2 * HALF_ANGLE * ASPECT * 0.78),
+    group.width * fontSize * scale / (2 * HALF_ANGLE * aspect * 0.78),
     group.height * fontSize * scale / (2 * HALF_ANGLE * 0.60),
     fontSize * 5,
   );
 }
 
-function opticalFontSize(group: MeasuredGroup): number {
+function opticalFontSize(group: MeasuredGroup, format: FilmFormat): number {
   // Match the default font's cap height, then fit unusually wide/tall groups.
   // The camera still checks both dimensions, including rotation and margins.
-  return 1.65 * Math.min(1, 0.7 / Math.max(0.7, group.capHeight), 6 / group.width, 4 / group.height);
+  return 1.65 * Math.min(1, 0.7 / Math.max(0.7, group.capHeight), groupWidthLimit(format) / group.width, 4 / group.height);
 }
 
-function readingPose(object: SceneObject, measured: MeasuredGroup, layoutRandom: () => number): CameraPose {
+function readingPose(object: SceneObject, measured: MeasuredGroup, layoutRandom: () => number, aspect: number): CameraPose {
   const angle = Math.abs(object.rotation[2]);
   const framed = {
     ...measured,
     width: Math.cos(angle) * measured.width + Math.sin(angle) * measured.height,
     height: Math.cos(angle) * measured.height + Math.sin(angle) * measured.width,
   };
-  const distance = distanceToFit(framed, object.fontSize) * 1.025;
+  const distance = distanceToFit(framed, object.fontSize, aspect) * 1.025;
   const yaw = (layoutRandom() - 0.5) * 0.065;
   return {
     position: [object.position[0] + distance * yaw, object.position[1] + distance * 0.008, object.position[2] + distance],
@@ -147,12 +146,13 @@ function travelControls(from: CameraPose, to: CameraPose, direction: number): re
 
 interface PosterPlacement { position: Vec3; scale: number }
 
-function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObject[], variant: number) {
+function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObject[], variant: number, format: FilmFormat) {
+  const aspect = filmAspect(format);
   const placements: PosterPlacement[] = [];
   const scale = 0.72;
   // Portal eligibility can enlarge a hero in its reading shot. Restore the
   // common optical size when the permanent objects assemble into the poster.
-  const scales = objects.map((object, index) => scale * opticalFontSize(measured[index]!) / object.fontSize);
+  const scales = objects.map((object, index) => scale * opticalFontSize(measured[index]!, format) / object.fontSize);
   const heights = measured.map((group, index) => group.inkHeight * objects[index]!.fontSize * scales[index]!);
   const gap = 0.58;
   const inkHeight = heights.reduce((sum, value) => sum + value, 0) + gap * (heights.length - 1);
@@ -161,7 +161,10 @@ function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObjec
   let width = 0;
   for (let index = 0; index < objects.length; index++) {
     const textWidth = measured[index]!.width * objects[index]!.fontSize * scales[index]!;
-    const x = objects.length === 1 || variant === 2 ? 0 : variant === 3 ? (largestWidth - textWidth) / 2 : (index % 2 ? 1 : -1) * Math.min(1.25, textWidth * 0.16) * (variant === 1 ? -1 : 1);
+    // Longer square lines align inside the same width, preserving their size
+    // rather than spending the extra horizontal room on outward staggering.
+    const stagger = format === 'square' ? (largestWidth - textWidth) / 2 : Math.min(1.25, textWidth * 0.16);
+    const x = objects.length === 1 || variant === 2 ? 0 : variant === 3 ? (largestWidth - textWidth) / 2 : (index % 2 ? 1 : -1) * stagger * (variant === 1 ? -1 : 1);
     const y = cursor - heights[index]! / 2;
     placements[index] = { position: [x, y, 0], scale: scales[index]! };
     width = Math.max(width, textWidth + Math.abs(x) * 2);
@@ -178,10 +181,13 @@ function poster(measured: readonly MeasuredGroup[], objects: readonly SceneObjec
   const frontDepth = Math.max(...objects.map((object, index) => object.extruded ? object.extrusionDepth * scales[index]! / 2 + 0.008 * object.fontSize * scales[index]! : 0));
   // First try fitting the complete stack. A small pullback often fits a short
   // quotation without needing a pan; keep capitals readable on a 360px phone.
-  const phraseDistance = Math.max(width / (2 * HALF_ANGLE * ASPECT * 0.78), Math.max(...framingHeights) / (2 * HALF_ANGLE * POSTER_SAFE_HEIGHT), 9) + 0.6 + frontDepth;
-  const fitDistance = Math.max(phraseDistance, totalHeight / (2 * HALF_ANGLE * POSTER_SAFE_HEIGHT) + 0.6 + frontDepth);
+  // The shorter square frame needs less extra depth beyond the safe margins;
+  // retain the same capital size at a common 360px displayed width.
+  const depthPadding = format === 'square' ? 0.3 : 0.6;
+  const phraseDistance = Math.max(width / (2 * HALF_ANGLE * aspect * 0.78), Math.max(...framingHeights) / (2 * HALF_ANGLE * POSTER_SAFE_HEIGHT), 9) + depthPadding + frontDepth;
+  const fitDistance = Math.max(phraseDistance, totalHeight / (2 * HALF_ANGLE * POSTER_SAFE_HEIGHT) + depthPadding + frontDepth);
   const capHeight = Math.min(...measured.map((group, index) => group.capHeight * objects[index]!.fontSize * scales[index]!));
-  const fittedCapPixels = capHeight * POSTER_REFERENCE_HEIGHT / (2 * HALF_ANGLE * fitDistance);
+  const fittedCapPixels = capHeight * (POSTER_REFERENCE_WIDTH / aspect) / (2 * HALF_ANGLE * fitDistance);
   const distance = fittedCapPixels >= MIN_POSTER_CAP_PIXELS ? fitDistance : phraseDistance;
   // The closest face of extruded lettering must also stay inside the safe frame.
   const frustumHeight = 2 * HALF_ANGLE * (distance - frontDepth);
@@ -233,12 +239,12 @@ function spatialLayout(measured: readonly MeasuredGroup[], style: DirectionStyle
   });
 }
 
-function dynamicTransition(id: number, start: number, end: number, from: CameraPose, to: CameraPose, mood: string, direction: number, fullRoll: boolean, fromObject: SceneObject, toObject: SceneObject, fromMeasured: MeasuredGroup, toMeasured: MeasuredGroup): CameraTrack[] {
+function dynamicTransition(id: number, start: number, end: number, from: CameraPose, to: CameraPose, mood: string, direction: number, fullRoll: boolean, fromObject: SceneObject, toObject: SceneObject, fromMeasured: MeasuredGroup, toMeasured: MeasuredGroup, aspect: number): CameraTrack[] {
   if (fullRoll) {
     const spinEnd = frameTime(start + 1.1);
     return [
       { id: `travel-${id}-spin`, start, end: spinEnd, primitive: 'ORBIT', from, to: from, controls: [[from.position[0] + direction * 0.6, from.position[1], from.position[2] + 1.2], [from.position[0] - direction * 0.6, from.position[1], from.position[2] + 1.2]], easing: 'cinematic', rollTurns: direction, focusObjectId: fromObject.id },
-      ...dynamicTransition(id, spinEnd, end, from, to, 'wide-orbit', direction, false, fromObject, toObject, fromMeasured, toMeasured),
+      ...dynamicTransition(id, spinEnd, end, from, to, 'wide-orbit', direction, false, fromObject, toObject, fromMeasured, toMeasured, aspect),
     ];
   }
   const a = from.position; const b = to.position;
@@ -261,7 +267,7 @@ function dynamicTransition(id: number, start: number, end: number, from: CameraP
   const extentY = Math.max(Math.abs(fromObject.position[1] - target[1]) + fromMeasured.height * fromObject.fontSize / 2, Math.abs(toObject.position[1] - target[1]) + toMeasured.height * toObject.fontSize / 2);
   const rotatedX = Math.abs(Math.cos(roll)) * extentX + Math.abs(Math.sin(roll)) * extentY;
   const rotatedY = Math.abs(Math.cos(roll)) * extentY + Math.abs(Math.sin(roll)) * extentX;
-  const contextDistance = Math.min(128, Math.max(rotatedX / (HALF_ANGLE * ASPECT * 0.76), rotatedY / (HALF_ANGLE * 0.7), 18));
+  const contextDistance = Math.min(128, Math.max(rotatedX / (HALF_ANGLE * aspect * 0.76), rotatedY / (HALF_ANGLE * 0.7), 18));
   position = [position[0], position[1], Math.max(fromObject.position[2], toObject.position[2]) + contextDistance];
   const middle: CameraPose = { position, target, roll };
   const split = frameTime(start + (end - start) * (mood === 'whip' ? 0.4 : 0.5));
@@ -319,8 +325,10 @@ function departure(object: SceneObject, measured: MeasuredGroup, index: number, 
   }
 }
 
-function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], themeId: string, seed: number, attempt: number): SceneSpec {
+function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], themeId: string, seed: number, attempt: number, format: FilmFormat): SceneSpec {
   if (measured.length === 0 || measured.length !== analysis.groups.length) throw new RangeError('Measured groups must match the analysis.');
+  const aspect = filmAspect(format);
+  const nearFrustumCorner = NEAR_PLANE * HALF_ANGLE * Math.hypot(1, aspect);
   const layoutRandom = stream(seed, `layout-${attempt}`);
   const motionRandom = stream(seed, `motion-${attempt}`);
   const colorRandom = stream(seed, `color-${attempt}`);
@@ -332,7 +340,7 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   const objects: SceneObject[] = measured.map((group, index) => {
     const emphasis = index === measured.length - 1 || index === firstSemantic;
     return {
-      id: group.id, text: group.group.text, displayText: group.displayText, fontSize: opticalFontSize(group),
+      id: group.id, text: group.group.text, displayText: group.displayText, fontSize: opticalFontSize(group, format),
       position: positions[index]!, rotation: [0, (layoutRandom() - 0.5) * 0.16, (layoutRandom() - 0.5) * 0.24], scale: 1,
       colorRole: colors[index]!,
       extruded: emphasis && !group.group.tokens.some(token => token.emoji), extrusionDepth: emphasis ? 0.20 : 0,
@@ -346,9 +354,9 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
     const candidates = measured.slice(0, -1).flatMap((group, index) => {
       const aperture = group.portal;
       // A word reduced to fit must not be enlarged again for a portal shot.
-      if (group.width > 6 || group.height > 4) return [];
+      if (group.width > groupWidthLimit(format) || group.height > 4) return [];
       if (!aperture || group.group.tokens.some(token => token.emoji) || aperture.radius <= 0.012) return [];
-      const necessarySize = (NEAR_FRUSTUM_CORNER + 0.025) / (aperture.radius - 0.008) * 1.12;
+      const necessarySize = (nearFrustumCorner + 0.025) / (aperture.radius - 0.008) * 1.12;
       return necessarySize <= 3 ? [{ index, aperture, size: Math.max(objects[index]!.fontSize, necessarySize) }] : [];
     });
     const choice = candidates[Math.floor(motionRandom() * candidates.length)];
@@ -356,12 +364,12 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
       const hero = objects[choice.index]!;
       hero.fontSize = choice.size; hero.extruded = true; hero.extrusionDepth = 0.24; hero.rotation = [0, 0, 0];
       const clearance = choice.aperture.radius * hero.fontSize - 0.008 * hero.fontSize - 0.025;
-      if (clearance > NEAR_FRUSTUM_CORNER) {
+      if (clearance > nearFrustumCorner) {
         portalIndex = choice.index;
         portalCenter = [hero.position[0] + choice.aperture.center[0] * hero.fontSize, hero.position[1] + choice.aperture.center[1] * hero.fontSize, hero.position[2]];
         const following = objects[portalIndex + 1]!;
         following.rotation = [0, (layoutRandom() - 0.5) * 0.05, 0];
-        following.position = [portalCenter[0], portalCenter[1], hero.position[2] - distanceToFit(measured[portalIndex + 1]!, following.fontSize) * 1.025 - 6];
+        following.position = [portalCenter[0], portalCenter[1], hero.position[2] - distanceToFit(measured[portalIndex + 1]!, following.fontSize, aspect) * 1.025 - 6];
         style.advanced = 'portal';
       }
     }
@@ -376,7 +384,7 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
       object.rotation = [0, direction * (offset % 2 ? -0.24 : 0.24), 0];
     }
   }
-  const poses = objects.map((object, index) => readingPose(object, measured[index]!, layoutRandom));
+  const poses = objects.map((object, index) => readingPose(object, measured[index]!, layoutRandom, aspect));
   // A whole camera revolution is a deliberate event, rather than every cut.
   const barrelIndex = style.transition === 'barrel-roll' ? objects.findIndex((_, index) => index > 0 && index - 1 !== portalIndex && !(tunnelStart !== -1 && index > tunnelStart && index <= tunnelStart + 2)) : -1;
   const transitionDurations = measured.slice(1).map((_, index) => {
@@ -392,7 +400,7 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   const revealDuration = frameTime(style.reveal === 'spiral' ? 1.35 : 1.1);
   const posterHold = 0.6;
   const posterVariant = DIRECTION_STYLES.reveal.indexOf(style.reveal as typeof DIRECTION_STYLES.reveal[number]);
-  const composition = poster(measured, objects, posterVariant);
+  const composition = poster(measured, objects, posterVariant, format);
   const finalHold = composition.scrollDuration > 0 ? posterHold : 0;
   const rushDuration = frameTime(style.finale === 'staggered-punch' ? 1.35 : style.finale === 'vortex' ? 1.2 : 1.05);
   const seamDuration = 0.2;
@@ -444,7 +452,7 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
         else if (cut) tracks.push({ id: `travel-${index}`, start: time, end: transitionEnd, primitive: 'CUT', from: to, to, easing: 'linear', cutBefore: true });
         else {
           const fullRoll = index === barrelIndex;
-          tracks.push(...dynamicTransition(index, time, transitionEnd, from, to, style.transition, direction * (index % 2 ? 1 : -1), fullRoll, objects[index - 1]!, objects[index]!, measured[index - 1]!, measured[index]!));
+          tracks.push(...dynamicTransition(index, time, transitionEnd, from, to, style.transition, direction * (index % 2 ? 1 : -1), fullRoll, objects[index - 1]!, objects[index]!, measured[index - 1]!, measured[index]!, aspect));
           fullRollUsed ||= fullRoll;
         }
         chapters.push({ time, objectId: objects[index]!.id, primitive: tunnel ? 'TUNNEL' : cut ? 'CUT' : 'ORBIT' });
@@ -496,19 +504,19 @@ function generate(analysis: TextAnalysis, measured: readonly MeasuredGroup[], th
   tracks.push({ id: 'loop-seam', start: rushEnd, end: duration, primitive: 'HOLD', from: rushPose, to: rushPose, easing: 'linear' });
   chapters.push({ time: rushStart, objectId: null, primitive: 'DEPTH' });
   return {
-    id: `generated-${seed >>> 0}-${attempt}`, generatorVersion: GENERATOR_VERSION,
+    id: `generated-${seed >>> 0}-${attempt}${format === 'square' ? '-square' : ''}`, generatorVersion: GENERATOR_VERSION,
     fontId: measured[0]?.fontId ?? DEFAULT_FONT_ID,
     fontVersion: `${getDisplayFont(measured[0]?.fontId).version}${analysis.tokens.some(token => token.emoji) ? `+noto-emoji-700-${emojiCoverage.version}` : ''}`,
     sourceText: analysis.sourceText, inputLanguage: analysis.language, themeId, seed: seed >>> 0, duration,
     directionStyle: style, posterTime: frameTime(revealEnd + Math.min(0.45, posterHold / 2)),
-    fps: FPS, aspect: ASPECT, fov: FOV, objects, cameraTracks: tracks, chapters,
+    fps: FPS, aspect, fov: FOV, objects, cameraTracks: tracks, chapters,
   };
 }
 
 export const MotionDirector = {
-  direct(analysis: TextAnalysis, measured: readonly MeasuredGroup[], themeId: string, seed: number, previousSignature?: string | readonly string[]): SceneSpec {
+  direct(analysis: TextAnalysis, measured: readonly MeasuredGroup[], themeId: string, seed: number, previousSignature?: string | readonly string[], format: FilmFormat = 'vertical'): SceneSpec {
     const history = typeof previousSignature === 'string' ? [previousSignature] : previousSignature ?? [];
-    if ((measured[0]?.fontId ?? DEFAULT_FONT_ID) === DEFAULT_FONT_ID && analysis.sourceText === FUTURE_QUOTE && seed === stableSeed(FUTURE_QUOTE) && history.length === 0) return { ...futureDemo, inputLanguage: analysis.language, themeId, seed };
+    if (format === 'vertical' && (measured[0]?.fontId ?? DEFAULT_FONT_ID) === DEFAULT_FONT_ID && analysis.sourceText === FUTURE_QUOTE && seed === stableSeed(FUTURE_QUOTE) && history.length === 0) return { ...futureDemo, inputLanguage: analysis.language, themeId, seed };
     const styles = history.flatMap(signature => {
       try { const style = (JSON.parse(signature) as { styles?: DirectionStyle }).styles; return style ? [style] : []; }
       catch { return []; }
@@ -525,8 +533,8 @@ export const MotionDirector = {
     for (let attempt = 0; attempt < 48; attempt++) {
       // A saved seed alone must reproduce the accepted film. Retry complete
       // candidate seeds, never invisible attempt-specific random streams.
-      if ((measured[0]?.fontId ?? DEFAULT_FONT_ID) === DEFAULT_FONT_ID && analysis.sourceText === FUTURE_QUOTE && candidateSeed === stableSeed(FUTURE_QUOTE)) candidateSeed = nextRemixSeed(analysis.sourceText, candidateSeed);
-      const spec = applySecretFilm(generate(analysis, measured, themeId, candidateSeed, 0));
+      if (format === 'vertical' && (measured[0]?.fontId ?? DEFAULT_FONT_ID) === DEFAULT_FONT_ID && analysis.sourceText === FUTURE_QUOTE && candidateSeed === stableSeed(FUTURE_QUOTE)) candidateSeed = nextRemixSeed(analysis.sourceText, candidateSeed);
+      const spec = applySecretFilm(generate(analysis, measured, themeId, candidateSeed, 0, format));
       if (accept(spec)) return spec;
       candidateSeed = nextRemixSeed(analysis.sourceText, candidateSeed);
     }

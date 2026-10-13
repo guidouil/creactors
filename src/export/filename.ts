@@ -2,7 +2,7 @@
 export const MAX_VIDEO_FILENAME_LENGTH = 76;
 
 /** Preserve readable words and accents while removing filesystem-reserved characters. */
-export function videoFilename(text: string, format: 'mp4' | 'webm'): string {
+export function exportFilename(text: string, format: 'mp4' | 'webm' | 'gif'): string {
   const extension = `.${format}`;
   let title = text.normalize('NFC')
     .replace(/[<>:"/\\|?*\u0000-\u001f\u007f-\u009f]/gu, ' ')
@@ -26,3 +26,6 @@ export function videoFilename(text: string, format: 'mp4' | 'webm'): string {
   stem = stem.replace(/[. ]+$/gu, '') || 'CREACTORS';
   return `${stem}${extension}`;
 }
+
+/** Retain the original API for video callers. */
+export const videoFilename = exportFilename;

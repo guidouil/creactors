@@ -4,6 +4,7 @@ import type { EmphasisScores, TextAnalysis, TextGroup } from '../text/director';
 import { graphemes, isEmojiCluster } from '../text/graphemes';
 import { EMOJI_ADVANCE } from './emoji';
 import { findPortal, type PortalCandidate } from './portals';
+import { filmAspect, type FilmFormat } from '../scene/format';
 
 export interface GlyphCounter {
   character: string;
@@ -94,7 +95,7 @@ export function measureLine(text: string, fontId = DEFAULT_FONT_ID): { width: nu
   return { width: Math.max(cursor, bounds.isEmpty() ? 0 : bounds.max.x - Math.min(0, bounds.min.x)), minY: bounds.isEmpty() ? 0 : bounds.min.y, maxY: bounds.isEmpty() ? 0.7 : bounds.max.y, counters };
 }
 
-function wrap(text: string, fontId: string, maxWidth = 6): string[] {
+function wrap(text: string, fontId: string, maxWidth: number, balanceWidth: number): string[] {
   const measure = (value: string) => measureLine(value, fontId);
   const words = text.trim().split(/\s+/u);
   const lines: string[] = [];
@@ -112,7 +113,7 @@ function wrap(text: string, fontId: string, maxWidth = 6): string[] {
   }
   if (current) lines.push(current);
   // Two shorter balanced lines often give short phrases far more visual weight.
-  if (lines.length === 1 && words.length >= 2 && words.length <= 4 && measure(lines[0]!).width > 3.1) {
+  if (lines.length === 1 && words.length >= 2 && words.length <= 4 && measure(lines[0]!).width > balanceWidth) {
     let best: readonly [string, string] | undefined;
     let bestDifference = Infinity;
     for (let at = 1; at < words.length; at++) {
@@ -125,10 +126,18 @@ function wrap(text: string, fontId: string, maxWidth = 6): string[] {
   return lines;
 }
 
-export function measureGroups(analysis: TextAnalysis, fontId = DEFAULT_FONT_ID): MeasuredGroup[] {
+export function groupWidthLimit(format: FilmFormat = 'vertical'): number {
+  // Use some of the wider frame for longer lines while keeping letter size
+  // useful in a feed. Spending all its width would make long phrases too small.
+  return 6 * Math.sqrt(filmAspect(format) / filmAspect('vertical'));
+}
+
+export function measureGroups(analysis: TextAnalysis, fontId = DEFAULT_FONT_ID, format: FilmFormat = 'vertical'): MeasuredGroup[] {
   const { metadata } = getDisplayFont(fontId);
+  const maxWidth = groupWidthLimit(format);
+  const balanceWidth = 3.1 * maxWidth / 6;
   return analysis.groups.map(group => {
-    const lines = wrap(group.text, fontId);
+    const lines = wrap(group.text, fontId, maxWidth, balanceWidth);
     const measured = lines.map(line => measureLine(line, fontId));
     const width = Math.max(...measured.map(line => line.width), 0.2);
     // Troika's block includes font ascender/descender, beyond tight outlines.

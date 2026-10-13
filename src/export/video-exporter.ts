@@ -1,6 +1,7 @@
 import { BufferTarget, CanvasSource, Mp4OutputFormat, Output, WebMOutputFormat } from 'mediabunny';
 import type { SceneRenderer } from '../scene/renderer';
 import type { SceneSpec } from '../scene/types';
+import { filmFormat } from '../scene/format';
 import { abortError, ExportCapabilityError, ExportResourceError } from './errors';
 import { candidateProfiles, encodingConfig, isExportAvailable, profileIsSupported, type ExportProfile } from './profiles';
 import { ProgressGuard } from './progress-guard';
@@ -120,10 +121,10 @@ export class VideoExporter {
     const previousTime = renderer.lastTime;
     const controller = new AbortController();
     const onAbort = () => controller.abort(options.signal?.reason ?? abortError());
-    let attemptedHeight: 1920 | 1280 = options.preferredHeight ?? 1920;
-    const onContextLost = () => controller.abort(new ExportResourceError('The WebGL rendering context was lost.', attemptedHeight === 1920));
+    let attemptedWidth: 1080 | 720 = options.preferredHeight === 1280 ? 720 : 1080;
+    const onContextLost = () => controller.abort(new ExportResourceError('The WebGL rendering context was lost.', attemptedWidth === 1080));
     let selected: ExportProfile | null = null;
-    const guard = new ProgressGuard(controller, () => attemptedHeight === 1920);
+    const guard = new ProgressGuard(controller, () => attemptedWidth === 1080);
     let job: EncodingJob | null = null;
     options.signal?.addEventListener('abort', onAbort, { once: true });
     renderer.canvas.addEventListener('webglcontextlost', onContextLost);
@@ -131,12 +132,12 @@ export class VideoExporter {
     try {
       guard.check();
       options.onProgress?.(0);
-      // Probe the actual portrait configuration, then encode and finalize a
+      // Probe the actual film configuration, then encode and finalize a
       // disposable 24-frame file, exercising repeated encoder batches.
       // isConfigSupported() and a single tiny batch can both overpromise.
-      for (const candidate of candidateProfiles(options.preferredHeight)) {
+      for (const candidate of candidateProfiles(options.preferredHeight, filmFormat(spec.aspect))) {
         guard.check();
-        attemptedHeight = candidate.height;
+        attemptedWidth = candidate.width;
         let supported = false;
         try { supported = await guard.wait(profileIsSupported(candidate)); }
         catch (error) { guard.check(); if (error instanceof ExportResourceError) throw error; }
@@ -193,7 +194,7 @@ export class VideoExporter {
       guard.check();
       const buffer = job.target.buffer;
       if (!buffer || !hasContainerHeader(buffer, selected.format)) {
-        throw new ExportResourceError('Video finalization did not create a valid file.', selected.height === 1920);
+        throw new ExportResourceError('Video finalization did not create a valid file.', selected.width === 1080);
       }
       const blob = new Blob([buffer], { type: selected.format === 'mp4' ? 'video/mp4' : 'video/webm' });
       options.onProgress?.(1);
@@ -202,7 +203,7 @@ export class VideoExporter {
     } catch (error) {
       if (controller.signal.aborted) throw controller.signal.reason ?? abortError();
       if (error instanceof ExportCapabilityError || error instanceof ExportResourceError) throw error;
-      throw new ExportResourceError('Native video encoding failed.', selected?.height === 1920, { cause: error });
+      throw new ExportResourceError('Native video encoding failed.', selected?.width === 1080, { cause: error });
     } finally {
       options.signal?.removeEventListener('abort', onAbort);
       renderer.canvas.removeEventListener('webglcontextlost', onContextLost);

@@ -1,8 +1,9 @@
 # CREACTORS — Make words move.
 
-CREACTORS turns a sentence or quotation into a deterministic, vertical 3D
+CREACTORS turns a sentence or quotation into a deterministic 3D
 kinetic typography film. Enter French or English text, press CREATE, then REMIX
-for another choreography or download the resulting video.
+for another choreography or download the resulting video or animated GIF. Choose **Vertical
+(9:16)** or **Square (1:1)**; vertical is the default.
 
 Everything runs in the browser. There is no application backend, account,
 database or AI API. Creation, local imports and export work offline. Optional
@@ -63,6 +64,12 @@ The complete build includes fonts, six recorded clips and license notices;
 
 ## Create, remix and export
 
+The format selector above the stage is available before and after CREATE.
+Changing format recomposes the line wrapping, camera framing and final poster
+while retaining the film's text, seed, font, colors, soundtrack and selected media.
+An unfinished draft stays available. REMIX keeps the chosen format. Preview and
+download use the same composition; square output is not a crop of the portrait film.
+
 On opening, the randomly preloaded example receives its own silent animated
 preview, with a fresh seed and palette. The editor remains ready for input;
 focusing or changing the draft stops this welcome loop. A reduced-motion
@@ -82,7 +89,7 @@ small does it scan from top to bottom, with a brief hold at the bottom. The scan
 to the font and line wrapping and fits within the 60-second film limit. Then the
 physical text objects accelerate through the camera and leave an empty frame
 matching the opening. Pause, replay, REMIX, download and theme controls sit below
-the portrait stage. Edit reopens the input on mobile without clearing it.
+the stage. Edit reopens the input on mobile without clearing it.
 Ctrl/Cmd+Enter also creates a film.
 
 The playback bar supports clicking, dragging and touch to inspect any instant.
@@ -98,7 +105,7 @@ and the text editor; horizontal photo and color galleries still scroll normally.
 
 The discreet question-mark button in the header opens a short French/English
 help dialog covering text and examples, REMIX, colors, music, up to five
-photos, GIFs or videos and portrait video downloads. It is available before or after generation;
+photos, GIFs or videos and vertical or square video/GIF downloads. It is available before or after generation;
 opening it retains the current film. Escape, the close button or a click outside
 the dialog closes it and restores keyboard focus. Help is also bundled offline.
 
@@ -132,7 +139,7 @@ PNG, JPEG, WebP, browser-supported AVIF and GIF files are accepted, up to 16 MiB
 Images stay on the device and are embedded in the prepared scene. Import retains
 orientation, transparency and aspect ratio, downsampling large images to a
 maximum edge of 2048 pixels to bound texture memory. Photos fit intact inside the
-portrait frame and keep their colors when the theme changes. Preview and video
+selected frame and keep their colors when the theme changes. Preview and video
 export evaluate their movements from the same absolute-time scene specification.
 
 Local MP4, WebM and MOV video clips are accepted when their video codec is
@@ -187,8 +194,11 @@ FR/EN in the header changes interface labels. Text language is detected locally
 with `franc`, independently of the interface language; there is no second language
 selector and the quotation is never translated. Detection is restricted to French
 and English. Short or ambiguous samples can remain uncertain. Six palette
-families are included: CaliforMandy Sunset, Monochrome, Coral Night, Cobalt,
-Orchid and Acid, each with a dark and light variant. The interface and film
+families are included: Califormandy, Monochrome, Coral Night, Cobalt,
+Orchid and Acid, each with a dark and light variant. The first family uses
+[Califormandy's](https://califormandy.com/) cream paper, soft black, bright pink
+and lime, plus an electric blue inspired by its stickers. Its light variant
+deepens the accent inks for readable contrast on cream. The interface and film
 follow the operating system's appearance, including live changes. Automatic
 colors are enabled initially: CREATE generates a seeded harmony rather
 than selecting one of six fixed palettes. REMIX retains the exact current palette,
@@ -249,18 +259,18 @@ The supplied Oh no and Générique de fin files are identified as user-provided,
 claim. Credit copying reports clipboard failures and leaves the text selectable
 for manual copying. Credits and notices remain available offline.
 
-Video export uses native WebCodecs and Mediabunny, with actual portrait
+Video export uses native WebCodecs and Mediabunny, with actual selected-format
 configuration checks followed by a disposable encoding/finalization test:
 
-1. H.264 MP4 at 1080×1920, 30 fps, approximately 12 Mbps.
-2. H.264 MP4 at 720×1280 when full resolution is unavailable.
-3. Genuine VP9 or VP8 WebM at a supported portrait resolution.
+1. H.264 MP4 at 1080×1920 (vertical) or 1080×1080 (square), 30 fps, approximately 12 Mbps.
+2. H.264 MP4 at 720×1280 or 720×720 when full resolution is unavailable.
+3. Genuine VP9 or VP8 WebM at a supported resolution in the chosen format.
 4. A clear unavailable state when none of the native encoders succeeds.
 
 The selected format and resolution are displayed during export. WebM files keep
 their real extension. Download filenames come from the generated film's original
 text, preserve accents, remove filesystem-reserved characters, and are limited to
-76 characters including `.mp4` or `.webm`. Editing an ungenerated draft does not
+76 characters including `.mp4`, `.webm` or `.gif`. Editing an ungenerated draft does not
 rename the existing film. A resource failure offers a subsequent 720p retry. Export
 is frame-by-frame; no real-time recording or FFmpeg/WASM is used. With a soundtrack,
 MP4 carries AAC and WebM carries Opus at 48 kHz. Both video and audio must pass
@@ -271,6 +281,25 @@ frames to respect muxer backpressure. See [Mediabunny media sources](https://med
 Frames are captured at absolute timestamps with awaited encoder backpressure.
 Preview pauses during encoding and is restored afterward. Cancellation,
 context loss, stalled progress and repeated exports release resources.
+
+The separate **GIF** button downloads the complete film as a silent, infinitely
+looping GIF89a animation in the selected vertical or square format. The soundtrack
+selection remains available for video export. Encoding uses the same absolute
+scene timeline, including imported photos, GIFs and decoded video frames.
+The initial GIF profile uses a maximum edge of 480 pixels and up to 12 frames
+per second. Resolution, cadence and palette adapt to preserve the full duration
+within a strict budget: below 5,000,000 bytes, at most 350 frames and at most
+36,152,320 total frame pixels. Smaller encodings are tried if the actual file
+exceeds the byte budget; an oversized file is never offered for download.
+The resulting dimensions and file size are displayed when ready. GIF has fewer
+colors and a lower frame rate than the video export.
+
+These budgets conservatively cover [X's mobile file-size limit](https://help.x.com/en/using-x/posting-gifs-and-pictures),
+[X's GIF frame recommendations](https://docs.x.com/x-api/media/quickstart/best-practices)
+and [LinkedIn's GIF frame/pixel limits](https://www.linkedin.com/help/linkedin/answer/a792945).
+GIF encoding works locally without a native video encoder, keeps only one raw
+frame at a time and yields between frames so export can be cancelled. Preview
+dimensions and playback position are restored on completion, cancellation or error.
 
 H.264 uses a small native encoder adapter feeding Mediabunny's packet source.
 It encodes in quality mode, flushes after at most three frames, restores exact
@@ -421,7 +450,7 @@ assets/           pinned fonts, generated coverage/outlines and licenses
 scripts/          asset preparation, packaging and artifact validation
 ```
 
-Preview uses a 540×960 drawing buffer independently of device pixel ratio.
+Preview uses a 540×960 (vertical) or 540×540 (square) drawing buffer independently of device pixel ratio.
 Export temporarily changes rendering resolution while preserving the same
 scene specification and projection. Hidden previews suspend playback.
 
@@ -514,8 +543,8 @@ node scripts/export-variety-smoke.mjs http://127.0.0.1:5173/ 5
 ```
 
 Set `CREACTORS_PREVIEW_URL` or pass the server URL when the port differs. Artifacts
-are saved under `artifacts/`. The current build passes 222 unit tests. The browser
-suite contains 72 cases (71 regular cases and one optional live GIPHY check),
+are saved under `artifacts/`. The current build passes 393 unit tests. The browser
+suite contains 111 cases (110 regular cases and one optional live GIPHY check),
 including demand-driven GIPHY search, pagination, source attribution, missing-key
 local import, retry, cancellation and focus restoration, GIF import/composition, mixed photo/GIF endings,
 absolute-time animation and decoded GIF video frames, automatic text-language detection, pointer,
@@ -526,13 +555,15 @@ native preview/export sample agreement over 60 seconds and repeated music in lon
 generated color variety, appearance round trips and palette stability during encoding,
 ordered final photos, direct text-to-photo transitions, overlapping arrivals without empty handoffs and their decoded MP4
 frames, compact reading groups, bilingual example selection, portable filename
-limits, fresh CREATE seeds, recent-direction
+limits, square recomposition and real looping GIF downloads, GIF frame/pixel/byte
+budgets, full-duration media capture, cancellation and codec-independent export,
+fresh CREATE seeds, recent-direction
 avoidance and exact reconstruction from a saved seed. Projected unit checks cover
 the ten quotations across 20 seeds, and actual renderer checks pass on 55
 bilingual/emoji scenes. A separate 12-seed visual review verifies visible
 rotations/reveals, safe reading frames and matching blank loop endpoints, with
 no unintended movement gap longer than 0.1 seconds. The portable HTML also passes free
-input, complete emoji, REMIX, themes and MP4 export with external networking
+input, complete emoji, REMIX, themes and MP4/GIF export with external networking
 blocked. Native Chrome exports at 12, 30 and 60 seconds have
 passed container/frame-count checks and decoded-frame comparison. A final
 13.4-second scene with full rotation, impacts and vortex departure passes MP4
